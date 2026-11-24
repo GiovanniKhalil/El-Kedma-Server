@@ -215,9 +215,19 @@ export interface Book {
   pageCount?: number;
 }
 
+export interface SeasonalEvent {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate?: string;
+  stageScope: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
 export type LibraryBook = Book;
 
-export type ChildEventType = 'mass' | 'sunday_school' | 'festival' | 'mahragan';
+export type ChildEventType = 'mass' | 'sunday_school' | string;
 export type StaffEventType = 'mass' | 'sunday_school' | 'general_meeting' | 'supervisors_meeting';
 export type EventType = ChildEventType | StaffEventType;
 export type AttendancePeriodType = 'weekly' | 'monthly' | 'seasonal_event';

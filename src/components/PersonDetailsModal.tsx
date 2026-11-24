@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { getStageBadgeClass } from '../utils/themeColors';
 import { calculateAge } from '../utils/dateUtils';
+import { getWhatsAppHref } from '../utils/phoneHelper';
 
 interface PersonDetailsModalProps {
   isOpen: boolean;
@@ -178,7 +179,7 @@ export const PersonDetailsModal: React.FC<PersonDetailsModalProps> = ({
                     <span>اتصال</span>
                   </a>
                   <a
-                    href={`https://wa.me/2${person.phone.replace(/[^0-9]/g, '')}`}
+                    href={getWhatsAppHref(person.phone) || '#'}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1 shadow-xs transition-colors"
@@ -268,7 +269,7 @@ export const PersonDetailsModal: React.FC<PersonDetailsModalProps> = ({
                         <span>اتصال</span>
                       </a>
                       <a
-                        href={`https://wa.me/2${child.parentPhone.replace(/[^0-9]/g, '')}`}
+                        href={getWhatsAppHref(child.parentPhone) || '#'}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="px-3.5 py-2 rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 transition-colors text-xs font-black flex items-center gap-1.5 shadow-xs"
@@ -320,7 +321,7 @@ export const PersonDetailsModal: React.FC<PersonDetailsModalProps> = ({
                           <span>اتصال</span>
                         </a>
                         <a
-                          href={`https://wa.me/2${child.parent2Phone.replace(/[^0-9]/g, '')}`}
+                          href={getWhatsAppHref(child.parent2Phone) || '#'}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="px-3.5 py-2 rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 transition-colors text-xs font-black flex items-center gap-1.5 shadow-xs"

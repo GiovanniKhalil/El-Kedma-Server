@@ -6,6 +6,7 @@ import {
   Save, Users, ShieldCheck, MessageCircle, Calendar, Edit3, Plus, UserPlus, Crown
 } from 'lucide-react';
 import { getStageBadgeClass } from '../utils/themeColors';
+import { getWhatsAppHref } from '../utils/phoneHelper';
 
 interface ServiceDetailsEditModalProps {
   isOpen: boolean;
@@ -722,7 +723,7 @@ export const ServiceDetailsEditModal: React.FC<ServiceDetailsEditModalProps> = (
                             <Phone className="w-3 h-3" />
                           </a>
                           <a
-                            href={`https://wa.me/2${srv.phone.replace(/[^0-9]/g, '')}`}
+                            href={getWhatsAppHref(srv.phone) || '#'}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="p-1 rounded-lg bg-emerald-500 text-white text-xs"

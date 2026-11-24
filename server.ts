@@ -1,7 +1,8 @@
 import 'dotenv/config';
 import crypto from 'node:crypto';
 import path from 'node:path';
-import express, { Request, Response, NextFunction } from 'express';
+import express from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import {
   readStore,
   writeStore,
@@ -9,6 +10,8 @@ import {
   findUserByIdentifier,
   getStudents,
   saveStudents,
+} from './server/dbStore.js';
+import type {
   StoredUser,
   StoredStudent,
 } from './server/dbStore.js';

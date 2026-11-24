@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 
 import { parseBirthDate } from './BirthdayWidget';
+import { getWhatsAppHref } from '../utils/phoneHelper';
+import { ChurchHierarchyTree } from './ChurchHierarchyTree';
 
 export const HomeTab: React.FC<{
   onOpenAddChild?: () => void;
@@ -504,7 +506,7 @@ export const HomeTab: React.FC<{
                         <a href={`tel:${k.parentPhone || k.phone}`} className="p-1.5 rounded-lg bg-white dark:bg-[#2d0e1c] shadow-2xs text-burgundy-700 dark:text-churchgold-300 hover:bg-amber-50 dark:hover:bg-[#3d1326] border border-amber-200/50 dark:border-[#4d1d2c]">
                           <Phone className="w-3.5 h-3.5" />
                         </a>
-                        <a href={`https://wa.me/2${k.parentPhone || k.phone}`} target="_blank" rel="noreferrer" className="p-1.5 rounded-lg bg-white dark:bg-[#2d0e1c] shadow-2xs text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-[#3d1326] border border-emerald-200/50 dark:border-[#4d1d2c]">
+                        <a href={getWhatsAppHref(k.parentPhone || k.phone) || '#'} target="_blank" rel="noreferrer" className="p-1.5 rounded-lg bg-white dark:bg-[#2d0e1c] shadow-2xs text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-[#3d1326] border border-emerald-200/50 dark:border-[#4d1d2c]">
                           <MessageCircle className="w-3.5 h-3.5" />
                         </a>
                       </div>
@@ -535,7 +537,7 @@ export const HomeTab: React.FC<{
                         <a href={`tel:${s.phone}`} className="p-1.5 rounded-lg bg-white dark:bg-[#2d0e1c] shadow-2xs text-burgundy-700 dark:text-churchgold-300 hover:bg-amber-50 dark:hover:bg-[#3d1326] border border-amber-200/50 dark:border-[#4d1d2c]">
                           <Phone className="w-3.5 h-3.5" />
                         </a>
-                        <a href={`https://wa.me/2${s.phone}`} target="_blank" rel="noreferrer" className="p-1.5 rounded-lg bg-white dark:bg-[#2d0e1c] shadow-2xs text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-[#3d1326] border border-emerald-200/50 dark:border-[#4d1d2c]">
+                        <a href={getWhatsAppHref(s.phone) || '#'} target="_blank" rel="noreferrer" className="p-1.5 rounded-lg bg-white dark:bg-[#2d0e1c] shadow-2xs text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-[#3d1326] border border-emerald-200/50 dark:border-[#4d1d2c]">
                           <MessageCircle className="w-3.5 h-3.5" />
                         </a>
                       </div>
@@ -557,6 +559,9 @@ export const HomeTab: React.FC<{
         </div>
 
       </div>
+
+      {/* Visual Ecclesiastical Church Hierarchy Tree */}
+      <ChurchHierarchyTree />
 
       {/* Modal: Add Notification */}
       {isAddNotifOpen && (

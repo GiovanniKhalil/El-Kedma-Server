@@ -6,6 +6,7 @@ import {
   ShieldCheck, Crown, Calendar, CheckCircle2, Clock 
 } from 'lucide-react';
 import { calculateAge } from '../utils/dateUtils';
+import { getWhatsAppHref } from '../utils/phoneHelper';
 
 // Helper function to extract day and month from various date string formats
 export function parseBirthDate(birthDateStr?: string, fallbackMonth?: number): { day: number; month: number } {
@@ -232,7 +233,7 @@ export const BirthdayWidget: React.FC<{ isOpen: boolean; onClose: () => void }> 
                               <a href={`tel:${k.parentPhone || k.phone}`} className="p-2 rounded-xl bg-white shadow-xs text-indigo-600 hover:bg-indigo-100 transition-colors" title="اتصال تلفوني">
                                 <Phone className="w-4 h-4" />
                               </a>
-                              <a href={`https://wa.me/2${k.parentPhone || k.phone}`} target="_blank" rel="noreferrer" className="p-2 rounded-xl bg-white shadow-xs text-emerald-600 hover:bg-emerald-100 transition-colors" title="واتساب تهنئة">
+                              <a href={getWhatsAppHref(k.parentPhone || k.phone) || '#'} target="_blank" rel="noreferrer" className="p-2 rounded-xl bg-white shadow-xs text-emerald-600 hover:bg-emerald-100 transition-colors" title="واتساب تهنئة">
                                 <MessageCircle className="w-4 h-4" />
                               </a>
                             </div>
@@ -267,7 +268,7 @@ export const BirthdayWidget: React.FC<{ isOpen: boolean; onClose: () => void }> 
                               <a href={`tel:${s.phone}`} className="p-2 rounded-xl bg-white shadow-xs text-emerald-700 hover:bg-emerald-100 transition-colors">
                                 <Phone className="w-4 h-4" />
                               </a>
-                              <a href={`https://wa.me/2${s.phone}`} target="_blank" rel="noreferrer" className="p-2 rounded-xl bg-white shadow-xs text-emerald-700 hover:bg-emerald-100 transition-colors">
+                              <a href={getWhatsAppHref(s.phone) || '#'} target="_blank" rel="noreferrer" className="p-2 rounded-xl bg-white shadow-xs text-emerald-700 hover:bg-emerald-100 transition-colors">
                                 <MessageCircle className="w-4 h-4" />
                               </a>
                             </div>
@@ -302,7 +303,7 @@ export const BirthdayWidget: React.FC<{ isOpen: boolean; onClose: () => void }> 
                               <a href={`tel:${sp.phone}`} className="p-2 rounded-xl bg-white shadow-xs text-amber-700 hover:bg-amber-100">
                                 <Phone className="w-4 h-4" />
                               </a>
-                              <a href={`https://wa.me/2${sp.phone}`} target="_blank" rel="noreferrer" className="p-2 rounded-xl bg-white shadow-xs text-emerald-700 hover:bg-emerald-100">
+                              <a href={getWhatsAppHref(sp.phone) || '#'} target="_blank" rel="noreferrer" className="p-2 rounded-xl bg-white shadow-xs text-emerald-700 hover:bg-emerald-100">
                                 <MessageCircle className="w-4 h-4" />
                               </a>
                             </div>
@@ -353,7 +354,7 @@ export const BirthdayWidget: React.FC<{ isOpen: boolean; onClose: () => void }> 
                                 <a href={`tel:${k.parentPhone || k.phone}`} className="p-1.5 rounded-lg bg-white shadow-xs text-indigo-600 hover:bg-indigo-100">
                                   <Phone className="w-3.5 h-3.5" />
                                 </a>
-                                <a href={`https://wa.me/2${k.parentPhone || k.phone}`} target="_blank" rel="noreferrer" className="p-1.5 rounded-lg bg-white shadow-xs text-emerald-600 hover:bg-emerald-100">
+                                <a href={getWhatsAppHref(k.parentPhone || k.phone) || '#'} target="_blank" rel="noreferrer" className="p-1.5 rounded-lg bg-white shadow-xs text-emerald-600 hover:bg-emerald-100">
                                   <MessageCircle className="w-3.5 h-3.5" />
                                 </a>
                               </div>
@@ -389,7 +390,7 @@ export const BirthdayWidget: React.FC<{ isOpen: boolean; onClose: () => void }> 
                                 <a href={`tel:${s.phone}`} className="p-1.5 rounded-lg bg-white shadow-xs text-emerald-700 hover:bg-emerald-100">
                                   <Phone className="w-3.5 h-3.5" />
                                 </a>
-                                <a href={`https://wa.me/2${s.phone}`} target="_blank" rel="noreferrer" className="p-1.5 rounded-lg bg-white shadow-xs text-emerald-700 hover:bg-emerald-100">
+                                <a href={getWhatsAppHref(s.phone) || '#'} target="_blank" rel="noreferrer" className="p-1.5 rounded-lg bg-white shadow-xs text-emerald-700 hover:bg-emerald-100">
                                   <MessageCircle className="w-3.5 h-3.5" />
                                 </a>
                               </div>
@@ -425,7 +426,7 @@ export const BirthdayWidget: React.FC<{ isOpen: boolean; onClose: () => void }> 
                                 <a href={`tel:${sp.phone}`} className="p-1.5 rounded-lg bg-white shadow-xs text-amber-700 hover:bg-amber-100">
                                   <Phone className="w-3.5 h-3.5" />
                                 </a>
-                                <a href={`https://wa.me/2${sp.phone}`} target="_blank" rel="noreferrer" className="p-1.5 rounded-lg bg-white shadow-xs text-emerald-700 hover:bg-emerald-100">
+                                <a href={getWhatsAppHref(sp.phone) || '#'} target="_blank" rel="noreferrer" className="p-1.5 rounded-lg bg-white shadow-xs text-emerald-700 hover:bg-emerald-100">
                                   <MessageCircle className="w-3.5 h-3.5" />
                                 </a>
                               </div>

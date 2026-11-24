@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { getStageBadgeClass } from '../utils/themeColors';
 import { ServiceDetailsEditModal } from './ServiceDetailsEditModal';
+import { SeasonalEventsManager } from './SeasonalEventsManager';
 import { StageItem } from '../types';
 
 interface ServicesManagerModalProps {
@@ -53,6 +54,7 @@ export const ServicesManagerModal: React.FC<ServicesManagerModalProps> = ({ isOp
 
   // Selected stage for full editing and viewing details
   const [selectedStageToEdit, setSelectedStageToEdit] = useState<StageItem | null>(null);
+  const [showSeasonalEventsModal, setShowSeasonalEventsModal] = useState(false);
 
   if (!isOpen) return null;
 
@@ -412,8 +414,24 @@ export const ServicesManagerModal: React.FC<ServicesManagerModalProps> = ({ isOp
               </form>
 
               {/* Existing Services List */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs font-black text-slate-700 dark:text-stone-300 px-1">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between bg-gradient-to-r from-amber-500/10 to-churchgold-500/10 dark:from-[#321123] dark:to-[#220a17] p-3.5 rounded-2xl border border-amber-300/60">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-churchgold-600" />
+                    <div>
+                      <h4 className="text-xs font-black text-slate-900 dark:text-stone-100">المناسبات والمهرجانات الموسمية</h4>
+                      <p className="text-[11px] text-slate-600 dark:text-stone-400">إدارة مهرجانات الصيف والمؤتمرات لظهورها في سجلات الحضور</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowSeasonalEventsModal(true)}
+                    className="px-3.5 py-2 bg-churchgold-600 hover:bg-churchgold-700 text-burgundy-950 font-black text-xs rounded-xl shadow-xs cursor-pointer"
+                  >
+                    إدارة المناسبات 🗓️
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between text-xs font-black text-slate-700 dark:text-stone-300 px-1 pt-1">
                   <span>الخدمات والمراحل الحالية ({stagesList.length}):</span>
                   <span className="text-[11px] text-slate-400 font-normal">اضغط على أي خدمة لتعديلها وتحديد المساعدين</span>
                 </div>
@@ -743,6 +761,11 @@ export const ServicesManagerModal: React.FC<ServicesManagerModalProps> = ({ isOp
         isOpen={!!selectedStageToEdit}
         onClose={() => setSelectedStageToEdit(null)}
         stage={selectedStageToEdit}
+      />
+
+      <SeasonalEventsManager
+        isOpen={showSeasonalEventsModal}
+        onClose={() => setShowSeasonalEventsModal(false)}
       />
     </div>
   );

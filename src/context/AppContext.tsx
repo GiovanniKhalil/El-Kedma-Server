@@ -4,7 +4,7 @@ import {
   Role, Stage, StageItem, AssistantSupervisor, ClassAssignment, ClassAssignmentRole,
   Child, Servant, Supervisor, Book, AttendanceRecord, AttendanceStatus,
   ChildEventType, StaffEventType, FilterState, AppUser, ChurchEventNotification,
-  ThemeMode, PendingRegistration
+  ThemeMode, PendingRegistration, SeasonalEvent
 } from '../types';
 import { DEFAULT_STAGES } from '../data/mockData';
 import { calculateDynamicAge } from '../utils/ageUtils';
@@ -23,6 +23,7 @@ import {
   listenToAnnouncements,
   listenToStages,
   listenToPendingRegistrations,
+  listenToSeasonalEvents,
   addMakhdoomToFirestore,
   updateMakhdoomInFirestore,
   deleteMakhdoomFromFirestore,
@@ -39,6 +40,9 @@ import {
   deleteLibraryBookFromFirestore,
   addAnnouncementToFirestore,
   deleteAnnouncementFromFirestore,
+  addSeasonalEventToFirestore,
+  updateSeasonalEventInFirestore,
+  deleteSeasonalEventFromFirestore,
   saveStageToFirestore,
   batchSaveStagesToFirestore,
   deleteStageFromFirestore,
@@ -139,6 +143,12 @@ interface AppContextType {
   notifications: ChurchEventNotification[];
   addNotification: (notif: Omit<ChurchEventNotification, 'id' | 'createdAt'>) => Promise<void>;
   deleteNotification: (id: string) => Promise<void>;
+
+  // Seasonal Events
+  seasonalEvents: SeasonalEvent[];
+  addSeasonalEvent: (event: Omit<SeasonalEvent, 'id' | 'createdAt'>) => Promise<void>;
+  updateSeasonalEvent: (id: string, data: Partial<SeasonalEvent>) => Promise<void>;
+  deleteSeasonalEvent: (id: string) => Promise<void>;
 
   // Stage Scoping
   selectedStageScope: Stage | 'all';
@@ -635,6 +645,59 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     return [];
   });
 
+  const [seasonalEvents, setSeasonalEvents] = useState<SeasonalEvent[]>(() => {
+    const saved = localStorage.getItem('church_app_seasonal_events');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
+
+  useEffect(() => { localStorage.setItem('church_app_seasonal_events', JSON.stringify(seasonalEvents)); }, [seasonalEvents]);
+
+  const addSeasonalEvent = async (eventData: Omit<SeasonalEvent, 'id' | 'createdAt'>) => {
+    const newEvent: SeasonalEvent = {
+      id: `ev_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      ...eventData,
+      createdAt: new Date().toISOString().split('T')[0]
+    };
+    if (firebaseAuthState.uid && !firebaseAuthState.isAnonymous) {
+      try {
+        await addSeasonalEventToFirestore(newEvent, newEvent.id);
+      } catch (err) {
+        console.warn('Failed to add seasonal event to Firestore:', err);
+      }
+    }
+    setSeasonalEvents(prev => [newEvent, ...prev]);
+  };
+
+  const updateSeasonalEvent = async (id: string, data: Partial<SeasonalEvent>) => {
+    if (firebaseAuthState.uid && !firebaseAuthState.isAnonymous) {
+      try {
+        await updateSeasonalEventInFirestore(id, data);
+      } catch (err) {
+        console.warn('Failed to update seasonal event in Firestore:', err);
+      }
+    }
+    setSeasonalEvents(prev => prev.map(e => (e.id === id ? { ...e, ...data } : e)));
+  };
+
+  const deleteSeasonalEvent = async (id: string) => {
+    if (firebaseAuthState.uid && !firebaseAuthState.isAnonymous) {
+      try {
+        await deleteSeasonalEventFromFirestore(id);
+      } catch (err) {
+        console.warn('Failed to delete seasonal event from Firestore:', err);
+      }
+    }
+    setSeasonalEvents(prev => prev.filter(e => e.id !== id));
+  };
+
   const [filters, setFilters] = useState<FilterState>(defaultFilters);
 
   // Live Refs (Prevent stale closures in async & batch operations)
@@ -1104,6 +1167,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       setNotifications(mappedNotifs);
     });
 
+    const unsubSeasonalEvents = listenToSeasonalEvents((firestoreEvents) => {
+      const mapped: SeasonalEvent[] = firestoreEvents.map(ev => ({
+        id: ev.id,
+        name: ev.name,
+        startDate: ev.startDate,
+        endDate: ev.endDate,
+        stageScope: ev.stageScope || 'all',
+        isActive: ev.isActive !== undefined ? ev.isActive : true,
+        createdAt: ev.createdAt || new Date().toISOString().split('T')[0]
+      }));
+      setSeasonalEvents(mapped);
+    });
+
     // 6. Real-time listener for Attendance (Unconditional)
     const unsubAttendance = listenToAttendance((rawAttendance) => {
       const groups: Record<string, AttendanceRecord> = {};
@@ -1135,6 +1211,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       unsubUsers();
       unsubLibrary();
       unsubAnnouncements();
+      unsubSeasonalEvents();
       unsubAttendance();
     };
   }, [firebaseAuthState.uid, firebaseAuthState.isAnonymous]);
@@ -3093,6 +3170,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         notifications,
         addNotification,
         deleteNotification,
+        seasonalEvents,
+        addSeasonalEvent,
+        updateSeasonalEvent,
+        deleteSeasonalEvent,
         selectedStageScope,
         setSelectedStageScope,
         children: dynamicChildren,

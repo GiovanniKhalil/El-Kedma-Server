@@ -1,20 +1,22 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Supervisor } from '../types';
-import { STAGES, MONTHS, AREAS } from '../data/mockData';
+import { MONTHS, AREAS } from '../data/mockData';
 import { 
   Search, Crown, Plus, Briefcase, Phone, MessageCircle, 
   MapPin, Cake, Edit3, Trash2, Download, Printer, User, Filter, SlidersHorizontal,
   Table, LayoutGrid
 } from 'lucide-react';
 import { PersonDetailsModal } from './PersonDetailsModal';
+import { PrintReportModal } from './PrintReportModal';
 import { getStageBadgeClass } from '../utils/themeColors';
+import { getWhatsAppHref } from '../utils/phoneHelper';
 
 export const SupervisorsDirectoryTab: React.FC<{
   onAddSupervisor: () => void;
   onEditSupervisor: (sup: Supervisor) => void;
 }> = ({ onAddSupervisor, onEditSupervisor }) => {
   const { supervisors, deleteSupervisor, selectedStageScope, stagesList } = useApp();
+  const [showPrintModal, setShowPrintModal] = useState(false);
   const [selectedDetailsSup, setSelectedDetailsSup] = useState<Supervisor | null>(null);
   const [supToDemote, setSupToDemote] = useState<{ sup: Supervisor; roleName: string } | null>(null);
 
@@ -115,7 +117,7 @@ export const SupervisorsDirectoryTab: React.FC<{
             </button>
 
             <button
-              onClick={() => window.print()}
+              onClick={() => setShowPrintModal(true)}
               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-stone-100 dark:bg-[#250d18] hover:bg-amber-100/60 dark:hover:bg-[#341121] text-slate-700 dark:text-stone-300 text-xs font-bold border border-amber-200/70 dark:border-[#4d1d2c] transition-colors cursor-pointer"
               title="طباعة الكشف"
             >
@@ -299,7 +301,7 @@ export const SupervisorsDirectoryTab: React.FC<{
                         <span>اتصال</span>
                       </a>
                       <a
-                        href={`https://wa.me/2${sup.phone.replace(/[^0-9]/g, '')}`}
+                        href={getWhatsAppHref(sup.phone) || '#'}
                         target="_blank"
                         rel="noreferrer"
                         className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors"
@@ -407,6 +409,11 @@ export const SupervisorsDirectoryTab: React.FC<{
           </div>
         </div>
       )}
+
+      <PrintReportModal
+        isOpen={showPrintModal}
+        onClose={() => setShowPrintModal(false)}
+      />
 
     </div>
   );

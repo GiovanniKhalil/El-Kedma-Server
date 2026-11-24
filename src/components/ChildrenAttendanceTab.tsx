@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { ChildEventType, AttendanceStatus } from '../types';
-import { STAGES } from '../data/mockData';
 import { 
   Church, BookOpen, Sparkles, Calendar, Check, X, Clock, 
   AlertCircle, Filter, CheckSquare, XSquare, Search, Download, 

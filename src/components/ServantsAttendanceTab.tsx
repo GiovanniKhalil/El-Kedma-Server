@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { StaffEventType, AttendanceStatus } from '../types';
-import { STAGES } from '../data/mockData';
 import { 
   Church, BookOpen, Users, Calendar, Check, X, Clock, 
   AlertCircle, Filter, CheckSquare, XSquare, Briefcase, ShieldCheck,
@@ -9,6 +8,7 @@ import {
   Table, LayoutGrid, CalendarPlus, UserCheck, Crown, CalendarCheck
 } from 'lucide-react';
 import { PersonAttendanceModal } from './PersonAttendanceModal';
+import { PrintReportModal } from './PrintReportModal';
 import { getStageBadgeClass } from '../utils/themeColors';
 
 export const ServantsAttendanceTab: React.FC = () => {
@@ -176,8 +176,10 @@ export const ServantsAttendanceTab: React.FC = () => {
     document.body.removeChild(link);
   };
 
+  const [showPrintModal, setShowPrintModal] = useState(false);
+
   const handlePrint = () => {
-    window.print();
+    setShowPrintModal(true);
   };
 
   const eventButtons: { id: StaffEventType; label: string; icon: any; color: string; activeBg: string }[] = [
@@ -837,6 +839,11 @@ export const ServantsAttendanceTab: React.FC = () => {
         onClose={() => setViewingServantHistory(null)}
         person={viewingServantHistory}
         targetType="servant"
+      />
+
+      <PrintReportModal
+        isOpen={showPrintModal}
+        onClose={() => setShowPrintModal(false)}
       />
 
     </div>

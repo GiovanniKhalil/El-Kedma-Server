@@ -10,7 +10,9 @@ import {
 } from 'lucide-react';
 import { PersonAttendanceModal } from './PersonAttendanceModal';
 import { PersonDetailsModal } from './PersonDetailsModal';
+import { PrintReportModal } from './PrintReportModal';
 import { getStageBadgeClass } from '../utils/themeColors';
+import { getWhatsAppHref } from '../utils/phoneHelper';
 
 export const ServantsDirectoryTab: React.FC<{
   onAddServant: () => void;
@@ -29,6 +31,7 @@ export const ServantsDirectoryTab: React.FC<{
       : (currentUser?.assignedStage || selectedStageScope);
 
   const [showPendingOnly, setShowPendingOnly] = useState(false);
+  const [showPrintModal, setShowPrintModal] = useState(false);
   const [viewingAttendanceServant, setViewingAttendanceServant] = useState<Servant | null>(null);
   const [selectedDetailsServant, setSelectedDetailsServant] = useState<Servant | null>(null);
   const [unassignSuccessMsg, setUnassignSuccessMsg] = useState<string | null>(null);
@@ -131,8 +134,16 @@ export const ServantsDirectoryTab: React.FC<{
     s => s.is_directory_visible !== false && !s.roleTitle?.includes('أمين الخدمة العام')
   );
 
+  const isDockServant = (s: Servant): boolean => {
+    const hasClassAssignment =
+      Boolean(s.assignments && s.assignments.some(a => a.stageName && a.stageName !== 'عامة' && a.stageName !== 'في انتظار التعيين')) ||
+      Boolean(s.assignedStage && s.assignedStage !== 'عامة' && s.assignedStage !== 'في انتظار التعيين');
+    if (hasClassAssignment) return false;
+    return s.roleType === 'general_dock' || s.assignedStage === 'عامة' || s.assignedStage === 'في انتظار التعيين' || !s.assignedStage;
+  };
+
   const filteredServants = visibleServants.filter(servant => {
-    // 1. أمين المرحلة ومساعد الأمين يرى فقط خدام فصله النشط
+    // 1. أمين المرحلة ومساعد الأمين يرى كافة خدام فصله النشط دون إخفاء
     if (isStageLeader) {
       const myStage = contextStage;
       const servesWithMe =
@@ -148,10 +159,9 @@ export const ServantsDirectoryTab: React.FC<{
       servant.phone.includes(query) ||
       (servant.roleTitle && servant.roleTitle.toLowerCase().includes(query));
 
-    // Show pending unassigned filter
-    const isPendingStage = servant.assignedStage === 'في انتظار التعيين' || servant.assignedStage === 'عامة' || !servant.assignedStage;
-    if (showPendingOnly) {
-      return matchesSearch && isPendingStage;
+    // Show pending unassigned filter (for general admin)
+    if (!isStageLeader && showPendingOnly) {
+      return matchesSearch && isDockServant(servant);
     }
 
     const matchesStage = isStageLeader ? true : (
@@ -162,16 +172,18 @@ export const ServantsDirectoryTab: React.FC<{
     );
     const matchesMonth = birthMonthFilter === 'all' || servant.birthMonth === Number(birthMonthFilter);
 
-    // Dock tab filtering
-    const isDock = servant.assignedStage === 'عامة' || servant.roleType === 'general_dock' || servant.assignedStage === 'في انتظار التعيين';
-    if (dockFilterTab === 'dock' && !isDock) return false;
-    if (dockFilterTab === 'assigned' && isDock) return false;
+    // Dock tab filtering (only applied when not a stage leader)
+    if (!isStageLeader) {
+      const isDock = isDockServant(servant);
+      if (dockFilterTab === 'dock' && !isDock) return false;
+      if (dockFilterTab === 'assigned' && isDock) return false;
+    }
 
     return matchesSearch && matchesStage && matchesMonth;
   });
 
-  const pendingServantsCount = visibleServants.filter(s => s.assignedStage === 'في انتظار التعيين' || s.assignedStage === 'عامة' || !s.assignedStage).length;
-  const dockCount = visibleServants.filter(s => s.assignedStage === 'عامة' || s.roleType === 'general_dock').length;
+  const pendingServantsCount = visibleServants.filter(s => isDockServant(s)).length;
+  const dockCount = visibleServants.filter(s => isDockServant(s)).length;
   const assignedCount = visibleServants.length - dockCount;
 
   const exportToCSV = () => {
@@ -248,7 +260,7 @@ export const ServantsDirectoryTab: React.FC<{
           </button>
 
           <button
-            onClick={() => window.print()}
+            onClick={() => setShowPrintModal(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-stone-100 dark:bg-[#250d18] hover:bg-amber-100/60 dark:hover:bg-[#341121] text-slate-700 dark:text-stone-300 text-xs font-bold border border-amber-200/70 dark:border-[#4d1d2c] transition-colors cursor-pointer"
           >
             <Printer className="w-3.5 h-3.5 text-churchgold-600 dark:text-churchgold-400" />
@@ -530,7 +542,7 @@ export const ServantsDirectoryTab: React.FC<{
                         <span>اتصال</span>
                       </a>
                       <a
-                        href={`https://wa.me/2${servant.phone.replace(/[^0-9]/g, '')}`}
+                        href={getWhatsAppHref(servant.phone) || '#'}
                         target="_blank"
                         rel="noreferrer"
                         className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors"
@@ -936,6 +948,11 @@ export const ServantsDirectoryTab: React.FC<{
           </div>
         </div>
       )}
+
+      <PrintReportModal
+        isOpen={showPrintModal}
+        onClose={() => setShowPrintModal(false)}
+      />
 
     </div>
   );

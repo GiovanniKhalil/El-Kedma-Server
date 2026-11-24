@@ -15,6 +15,7 @@ import { PrintReportModal } from './PrintReportModal';
 import { getStageBadgeClass } from '../utils/themeColors';
 import { calculateAge, isUpcomingBirthday, getDaysUntilBirthday } from '../utils/dateUtils';
 import { exportChildrenToXLSX, parseExcelOrCsvFile, downloadExcelTemplate } from '../utils/excelService';
+import { getWhatsAppHref } from '../utils/phoneHelper';
 
 type FilterCriterion = 'all' | 'stage' | 'area' | 'birthMonth' | 'age';
 
@@ -498,7 +499,7 @@ export const ChildrenDirectoryTab: React.FC<{
                           <span>اتصال</span>
                         </a>
                         <a
-                          href={`https://wa.me/2${child.parentPhone.replace(/[^0-9]/g, '')}`}
+                          href={getWhatsAppHref(child.parentPhone) || '#'}
                           target="_blank"
                           rel="noreferrer"
                           className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors"
@@ -538,7 +539,7 @@ export const ChildrenDirectoryTab: React.FC<{
                             <span>اتصال</span>
                           </a>
                           <a
-                            href={`https://wa.me/2${child.parent2Phone.replace(/[^0-9]/g, '')}`}
+                            href={getWhatsAppHref(child.parent2Phone) || '#'}
                             target="_blank"
                             rel="noreferrer"
                             className="px-2.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1 shadow-2xs transition-colors"
@@ -574,7 +575,7 @@ export const ChildrenDirectoryTab: React.FC<{
                           <span>اتصال</span>
                         </a>
                         <a
-                          href={`https://wa.me/2${child.phone.replace(/[^0-9]/g, '')}`}
+                          href={getWhatsAppHref(child.phone) || '#'}
                           target="_blank"
                           rel="noreferrer"
                           className="px-2.5 py-1 rounded-lg bg-emerald-100 dark:bg-[#12281c] text-emerald-900 dark:text-emerald-200 text-xs font-bold flex items-center gap-1 border border-emerald-300 dark:border-[#1d4633]"

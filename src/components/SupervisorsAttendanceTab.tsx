@@ -9,11 +9,13 @@ import {
   Table, LayoutGrid, CalendarPlus, CalendarCheck
 } from 'lucide-react';
 import { getStageBadgeClass } from '../utils/themeColors';
+import { PrintReportModal } from './PrintReportModal';
 
 export const SupervisorsAttendanceTab: React.FC = () => {
   const { supervisors, currentUser, markAttendance, markAllAttendance, getAttendanceRecord, stagesList, setActiveTab } = useApp();
 
   const [isAddingNewDay, setIsAddingNewDay] = useState(false);
+  const [showPrintModal, setShowPrintModal] = useState(false);
   const [customNewDate, setCustomNewDate] = useState('');
   const [selectedEventType, setSelectedEventType] = useState<StaffEventType>('general_meeting');
   const [selectedDate, setSelectedDate] = useState<string>(() => {
@@ -532,7 +534,7 @@ export const SupervisorsAttendanceTab: React.FC = () => {
                 <span>تصدير Excel</span>
               </button>
               <button
-                onClick={() => window.print()}
+                onClick={() => setShowPrintModal(true)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-stone-200 dark:bg-[#341121] hover:bg-stone-300 text-slate-800 dark:text-stone-200 text-xs font-bold transition-colors cursor-pointer"
               >
                 <Printer className="w-3.5 h-3.5" />
@@ -812,6 +814,11 @@ export const SupervisorsAttendanceTab: React.FC = () => {
           <div>اعتماد كاهن الخدمة: .........................</div>
         </div>
       </div>
+
+      <PrintReportModal
+        isOpen={showPrintModal}
+        onClose={() => setShowPrintModal(false)}
+      />
 
     </div>
   );

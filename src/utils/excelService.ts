@@ -27,6 +27,21 @@ export interface ParsedChildExcelRow {
 }
 
 /**
+ * Spelling normalization for dynamic stage names (handling hamzas, diacritics, spaces)
+ */
+export function normalizeStageName(raw: string): Stage {
+  const clean = (raw || '').trim().replace(/[إأآا]/g, 'ا').replace(/ة/g, 'ه').toLowerCase();
+  if (clean.includes('حضانه') || clean.includes('حضانة')) return 'حضانة';
+  if (clean.includes('اولى') || clean.includes('تانيه') || clean.includes('ثانية') || clean.includes('1') || clean.includes('2')) return 'ابتدائي (أولى وتانية)';
+  if (clean.includes('ثالثه') || clean.includes('ثالثة') || clean.includes('رابعه') || clean.includes('رابعة') || clean.includes('3') || clean.includes('4')) return 'ابتدائي (ثالثة ورابعة)';
+  if (clean.includes('خامسه') || clean.includes('خامسة') || clean.includes('سادسه') || clean.includes('سادسة') || clean.includes('5') || clean.includes('6')) return 'ابتدائي (خامسة وسادسة)';
+  if (clean.includes('اعدادي') || clean.includes('إعدادي')) return 'إعدادي';
+  if (clean.includes('ثانوي')) return 'ثانوي';
+  if (clean.includes('جامعي') || clean.includes('خريج') || clean.includes('شباب')) return 'خريجون وشباب جامعي';
+  return raw || 'ابتدائي (ثالثة ورابعة)';
+}
+
+/**
  * Exports children records to an authentic .xlsx spreadsheet
  */
 export function exportChildrenToXLSX(children: Child[], stageName = 'عام'): void {
@@ -91,7 +106,7 @@ export function exportChildrenToXLSX(children: Child[], stageName = 'عام'): v
 }
 
 /**
- * Exports Attendance Records filtered by Month to .xlsx
+ * Exports Attendance Records filtered by Month to .xlsx (Supports late status & secondary stages)
  */
 export function exportAttendanceMonthToXLSX(
   attendanceRecords: AttendanceRecord[],
@@ -115,10 +130,10 @@ export function exportAttendanceMonthToXLSX(
   // Extract unique sorted dates for this month
   const dates = Array.from(new Set(monthRecords.map(r => r.date))).sort();
 
-  // Filter children
+  // Filter children by primary stage or secondaryStages
   const scopedChildren = stageFilter === 'all' 
     ? childrenList 
-    : childrenList.filter(c => c.stage === stageFilter);
+    : childrenList.filter(c => c.stage === stageFilter || (c.secondaryStages && c.secondaryStages.includes(stageFilter)));
 
   // Build matrix data
   const rows = scopedChildren.map((kid, idx) => {
@@ -126,6 +141,7 @@ export function exportAttendanceMonthToXLSX(
       'م': idx + 1,
       'اسم المخدوم': kid.name,
       'المرحلة': kid.stage,
+      'المراحل الفرعية': kid.secondaryStages?.join(', ') || '—',
       'السن': calculateAge(kid.birthDate, kid.age),
       'تليفون ولي الأمر': kid.parentPhone
     };
@@ -142,6 +158,10 @@ export function exportAttendanceMonthToXLSX(
         mark = 'حاضر ✓';
         presentDays++;
         recordedDays++;
+      } else if (kidStatus === 'late') {
+        mark = 'متأخر ⏳';
+        presentDays++; // Count late towards present attendance
+        recordedDays++;
       } else if (kidStatus === 'absent') {
         mark = 'غائب ✗';
         recordedDays++;
@@ -150,7 +170,6 @@ export function exportAttendanceMonthToXLSX(
         recordedDays++;
       }
       
-      // Label formatted date column e.g. "2026-09-06"
       rowObj[d] = mark;
     });
 
@@ -213,11 +232,17 @@ export async function parseExcelOrCsvFile(file: File): Promise<ParsedChildExcelR
   const birthDateCol = getCol('تاريخ الميلاد', 'الميلاد', 'birthdate', 'dob');
   const areaCol = getCol('المنطقة', 'السكن', 'العنوان', 'area', 'address');
   const phoneCol = getCol('تليفون الولد', 'رقم الولد', 'موبايل الولد', 'phone');
-  const parentNameCol = getCol('اسم ولي الأمر', 'ولي الأمر', 'الوالد', 'الأب', 'parent');
-  const parentRelationCol = getCol('صلة القرابة', 'صلة', 'relation');
-  const parentPhoneCol = getCol('تليفون ولي الأمر', 'موبايل ولي الأمر', 'رقم ولي الأمر', 'parent phone', 'هاتف ولي الأمر');
-  const parentJobCol = getCol('وظيفة', 'المهنة', 'مهنة ولي الأمر', 'job');
-  const notesCol = getCol('ملاحظات', 'افتفاد', 'notes');
+  
+  const parentNameCol = getCol('اسم ولي الأمر (1)', 'ولي الأمر 1', 'الوالد', 'الأب', 'parent 1', 'ولي الأمر');
+  const parentRelationCol = getCol('صلة القرابة (1)', 'صلة 1', 'relation 1');
+  const parentPhoneCol = getCol('تليفون ولي الأمر (1)', 'موبايل ولي الأمر 1', 'رقم ولي الأمر 1', 'parent phone 1', 'هاتف ولي الأمر');
+  const parentJobCol = getCol('مهنة ولي الأمر (1)', 'وظيفة 1', 'مهنة 1');
+
+  const parent2NameCol = getCol('اسم ولي الأمر (2)', 'ولي الأمر 2', 'الأم', 'parent 2', 'الام');
+  const parent2RelationCol = getCol('صلة القرابة (2)', 'صلة 2', 'relation 2');
+  const parent2PhoneCol = getCol('تليفون ولي الأمر (2)', 'موبايل ولي الأمر 2', 'رقم ولي الأمر 2', 'parent phone 2');
+  const parent2JobCol = getCol('مهنة ولي الأمر (2)', 'وظيفة 2', 'مهنة 2');
+  const notesCol = getCol('ملاحظات', 'افتقاد', 'notes');
 
   if (nameCol === -1) {
     throw new Error('لم يتم التعرف على عمود "اسم المخدوم" في ملف الإكسيل. يرجى التأكد من ترويسة الأعمدة.');
@@ -238,19 +263,12 @@ export async function parseExcelOrCsvFile(file: File): Promise<ParsedChildExcelR
       ? 'girl' 
       : 'boy';
 
-    // Stage
+    // Stage (Normalized spelling)
     const rawStage = stageCol !== -1 ? String(row[stageCol] || '').trim() : '';
-    let stage: Stage = 'ابتدائي (ثالثة ورابعة)';
-    if (rawStage.includes('حضانة')) stage = 'حضانة';
-    else if (rawStage.includes('أولى') || rawStage.includes('ثانية') || rawStage.includes('تانية') || rawStage.includes('1') || rawStage.includes('2')) stage = 'ابتدائي (أولى وتانية)';
-    else if (rawStage.includes('خامسة') || rawStage.includes('سادسة') || rawStage.includes('5') || rawStage.includes('6')) stage = 'ابتدائي (خامسة وسادسة)';
-    else if (rawStage.includes('إعدادي') || rawStage.includes('اعدادي')) stage = 'إعدادي';
-    else if (rawStage.includes('ثانوي')) stage = 'ثانوي';
-    else if (rawStage.includes('جامعي') || rawStage.includes('خريج')) stage = 'خريجون وشباب جامعي';
+    const stage = normalizeStageName(rawStage);
 
     // BirthDate
     let birthDate = birthDateCol !== -1 ? String(row[birthDateCol] || '').trim() : '';
-    // Format excel serial date if detected
     if (/^\d{5}$/.test(birthDate)) {
       try {
         const serial = parseInt(birthDate, 10);
@@ -269,7 +287,6 @@ export async function parseExcelOrCsvFile(file: File): Promise<ParsedChildExcelR
       }
     }
 
-    // Age
     const rawAge = ageCol !== -1 ? parseInt(String(row[ageCol] || ''), 10) : undefined;
     const age = calculateAge(birthDate, rawAge || 9);
 
@@ -279,6 +296,11 @@ export async function parseExcelOrCsvFile(file: File): Promise<ParsedChildExcelR
     const parentRelation = parentRelationCol !== -1 ? String(row[parentRelationCol] || '').trim() : 'الأب';
     const parentPhone = parentPhoneCol !== -1 ? String(row[parentPhoneCol] || '').trim() : '';
     const parentJob = parentJobCol !== -1 ? String(row[parentJobCol] || '').trim() : '';
+
+    const parent2Name = parent2NameCol !== -1 ? String(row[parent2NameCol] || '').trim() : '';
+    const parent2Relation = parent2RelationCol !== -1 ? String(row[parent2RelationCol] || '').trim() : (parent2Name ? 'الأم' : undefined);
+    const parent2Phone = parent2PhoneCol !== -1 ? String(row[parent2PhoneCol] || '').trim() : '';
+    const parent2Job = parent2JobCol !== -1 ? String(row[parent2JobCol] || '').trim() : '';
     const notes = notesCol !== -1 ? String(row[notesCol] || '').trim() : '';
 
     parsedList.push({
@@ -292,8 +314,12 @@ export async function parseExcelOrCsvFile(file: File): Promise<ParsedChildExcelR
       phone,
       parentName,
       parentRelation: parentRelation || 'الأب',
-      parentPhone: parentPhone || '01000000000',
+      parentPhone,
       parentJob,
+      parent2Name: parent2Name || undefined,
+      parent2Relation: parent2Relation || undefined,
+      parent2Phone: parent2Phone || undefined,
+      parent2Job: parent2Job || undefined,
       notes
     });
   }
@@ -318,6 +344,10 @@ export function downloadExcelTemplate(): void {
       'صلة القرابة (1)': 'الأب',
       'تليفون ولي الأمر (1)': '01221112222',
       'مهنة ولي الأمر (1)': 'مهندس مدني',
+      'اسم ولي الأمر (2)': 'مريم جرجس',
+      'صلة القرابة (2)': 'الأم',
+      'تليفون ولي الأمر (2)': '01223334444',
+      'مهنة ولي الأمر (2)': 'طبيبة',
       'ملاحظات الخدمة والافتقاد': 'شاطر ومواظب على مدارس الأحد'
     },
     {
@@ -332,6 +362,10 @@ export function downloadExcelTemplate(): void {
       'صلة القرابة (1)': 'الأب',
       'تليفون ولي الأمر (1)': '01003334444',
       'مهنة ولي الأمر (1)': 'محاسب',
+      'اسم ولي الأمر (2)': '',
+      'صلة القرابة (2)': '',
+      'تليفون ولي الأمر (2)': '',
+      'مهنة ولي الأمر (2)': '',
       'ملاحظات الخدمة والافتقاد': 'تحب التلوين وألحان الكنيسة'
     }
   ];
@@ -341,6 +375,7 @@ export function downloadExcelTemplate(): void {
   worksheet['!cols'] = [
     { wch: 25 }, { wch: 8 }, { wch: 22 }, { wch: 8 },
     { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 22 },
+    { wch: 12 }, { wch: 15 }, { wch: 18 }, { wch: 22 },
     { wch: 12 }, { wch: 15 }, { wch: 18 }, { wch: 30 }
   ];
 

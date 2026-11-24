@@ -129,6 +129,15 @@ export interface FirestoreAnnouncement {
   createdAt: string;
 }
 
+export interface FirestoreSeasonalEvent {
+  name: string;
+  startDate: string;
+  endDate?: string;
+  stageScope: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
 export interface FirestoreStage {
   id: string;
   name: string;
@@ -154,6 +163,7 @@ export const COLLECTIONS = {
   ANNOUNCEMENTS: 'announcements',
   STAGES: 'stages',
   PENDING_REGISTRATIONS: 'pending_registrations',
+  SEASONAL_EVENTS: 'seasonal_events',
 } as const;
 
 function stripUndefined<T extends Record<string, any>>(obj: T): Record<string, any> {
@@ -262,6 +272,25 @@ export function listenToAnnouncements(
     },
     (error) => {
       handleFirestoreError(error, OperationType.LIST, COLLECTIONS.ANNOUNCEMENTS);
+    }
+  );
+}
+
+export function listenToSeasonalEvents(
+  callback: (events: (FirestoreSeasonalEvent & { id: string })[]) => void
+) {
+  const colRef = collection(db, COLLECTIONS.SEASONAL_EVENTS);
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const data = snapshot.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...(docSnap.data() as FirestoreSeasonalEvent),
+      }));
+      callback(data);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, COLLECTIONS.SEASONAL_EVENTS);
     }
   );
 }
@@ -810,6 +839,49 @@ export async function deleteAnnouncementFromFirestore(id: string): Promise<void>
   const path = `${COLLECTIONS.ANNOUNCEMENTS}/${id}`;
   try {
     await deleteDoc(doc(db, COLLECTIONS.ANNOUNCEMENTS, id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+    throw error;
+  }
+}
+
+// --- Seasonal Events ---
+export async function addSeasonalEventToFirestore(
+  event: FirestoreSeasonalEvent,
+  customId?: string
+): Promise<string> {
+  try {
+    const cleanData = stripUndefined(event);
+    if (customId) {
+      await setDoc(doc(db, COLLECTIONS.SEASONAL_EVENTS, customId), cleanData);
+      return customId;
+    } else {
+      const ref = await addDoc(collection(db, COLLECTIONS.SEASONAL_EVENTS), cleanData);
+      return ref.id;
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, COLLECTIONS.SEASONAL_EVENTS);
+    throw error;
+  }
+}
+
+export async function updateSeasonalEventInFirestore(
+  id: string,
+  data: Partial<FirestoreSeasonalEvent>
+): Promise<void> {
+  const path = `${COLLECTIONS.SEASONAL_EVENTS}/${id}`;
+  try {
+    await setDoc(doc(db, COLLECTIONS.SEASONAL_EVENTS, id), sanitizeFirestoreUpdatePayload(data), { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+    throw error;
+  }
+}
+
+export async function deleteSeasonalEventFromFirestore(id: string): Promise<void> {
+  const path = `${COLLECTIONS.SEASONAL_EVENTS}/${id}`;
+  try {
+    await deleteDoc(doc(db, COLLECTIONS.SEASONAL_EVENTS, id));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
     throw error;
