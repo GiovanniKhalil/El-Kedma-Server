@@ -1,8 +1,27 @@
-export type Role = 'khadem' | 'amin_fasl' | 'amin_khedma_am';
+// ============================================================================
+// Domain Model: Multi-Class Tree Hierarchy & Strict RBAC
+// ============================================================================
+
+export type ServantRoleType =
+  | 'amin_khedma_am'
+  | 'amin_fasl'
+  | 'mosaed_amin'
+  | 'khadem'
+  | 'general_dock';
+
+export type ClassAssignmentRole = 'amin_fasl' | 'mosaed_amin' | 'khadem';
+
+export type Role = ServantRoleType;
 
 export type ThemeMode = 'light' | 'dark';
 
 export type Stage = string;
+
+export interface ClassAssignment {
+  stageId: string;
+  stageName: string;
+  role: ClassAssignmentRole;
+}
 
 export interface AssistantSupervisor {
   name: string;
@@ -13,36 +32,70 @@ export interface StageItem {
   id: string;
   name: string;
   description?: string;
-  supervisorName?: string; // اسم أمين الخدمة / أمين المرحلة
-  supervisorPhone?: string; // تليفون أمين الخدمة
-  assistantSupervisors?: AssistantSupervisor[]; // مساعدو أمين الخدمة
-  captainName?: string; // للتوافق العكسي
+  supervisorName?: string;
+  supervisorPhone?: string;
+  assistantSupervisors?: AssistantSupervisor[];
+  captainName?: string;
   captainPhone?: string;
-  firstMateName?: string; // للتوافق العكسي
+  firstMateName?: string;
   firstMatePhone?: string;
-  meetingTime?: string; // موعد الخدمة / القداس
+  meetingTime?: string;
   isCustom?: boolean;
 }
 
+/**
+ * Unified Multi-Assignment Account (Servant / Stage Leader / General Admin)
+ */
 export interface AppUser {
   id: string;
+  uid?: string;
   username: string;
   name: string;
+  fullName?: string;
+  phone?: string;
+  avatarUrl?: string;
   role: Role;
   assignedStage: Stage;
-  assignedStages?: Stage[]; // مراحل الخدمة المتعددة التي يخدم بها
+  assignedStages?: Stage[];
+  assignments?: ClassAssignment[];
+  isProtectedRoot?: boolean;
+  isAdminAssistant?: boolean;
+  canAssignMakhdomeen?: boolean;
+  mustChangePassword?: boolean;
   isTempPassword?: boolean;
-  password?: string; // مشفر بـ SHA-256
-  passwordHash?: string; // التشفير الصريح لكلمة السر
-  phone?: string;
+  password?: string;
+  passwordHash?: string;
   job?: string;
   area?: string;
   birthDate?: string;
   notes?: string;
-  canManageSupervisors?: boolean; // صلاحية خاصة لتعديل وتسكين أمين خدمة بالتحقق الأمني
-  isAuthorizedAdmin?: boolean; // مفوض إدارياً لإدارة الحسابات
+  canManageSupervisors?: boolean;
+  isAuthorizedAdmin?: boolean;
   createdAt?: string;
+  updatedAt?: string;
 }
+
+export type Account = AppUser;
+export type User = AppUser;
+
+/**
+ * Isolated Pending Servant Registration (unauthenticated submission -> admin review)
+ */
+export interface PendingRegistration {
+  id: string;
+  fullName: string;
+  username: string;
+  phone: string;
+  birthDate?: string;
+  notes?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+}
+
+/**
+ * Announcement / Event Notification
+ */
+export type AnnouncementTargetScope = 'all' | 'general_dock' | 'specific_stages';
 
 export interface ChurchEventNotification {
   id: string;
@@ -50,55 +103,65 @@ export interface ChurchEventNotification {
   description: string;
   date: string; // YYYY-MM-DD
   time?: string;
-  targetStage: Stage; // 'عامة' for all or specific Stage
+  targetStage: Stage;
+  targetScope?: AnnouncementTargetScope;
+  targetStages?: Stage[];
   type: 'event' | 'alert' | 'spiritual' | 'meeting';
   createdBy?: string;
   createdAt?: string;
 }
 
+export type Announcement = ChurchEventNotification;
+
 export type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
 
+/**
+ * Child / Makhdoom (Record-Only, No Login)
+ */
 export interface Child {
   id: string;
   name: string;
-  stage: Stage; // المرحلة الأساسية
+  stageId?: string;
+  stage: Stage;
+  secondaryStages?: Stage[];
+  assignedServantId?: string;
   age: number;
-  birthDate: string; // YYYY-MM-DD (تاريخ الميلاد كاملاً)
+  birthDate: string; // YYYY-MM-DD
   birthMonth: number; // 1-12
-  area?: string; // المنطقة (اختياري / ملغي)
-  phone: string; // رقم تلفون الولد
-  // بيانات ولي الأمر الأول (الأساسي)
-  parentName: string; // اسم ولي الأمر الأول
-  parentRelation?: string; // صلة القرابة (أب، والد، جد...)
-  parentPhone: string; // رقم تليفون ولي الأمر الأول
-  parentJob?: string; // وظيفة ولي الأمر الأول (اختياري)
-  // بيانات ولي الأمر الثاني (ولي أمر آخر إضافي / احتياطي)
-  parent2Name?: string; // اسم ولي الأمر الثاني
-  parent2Relation?: string; // صلة القرابة (أم، والدة، جدة...)
-  parent2Phone?: string; // رقم تليفون ولي الأمر الثاني
-  parent2Job?: string; // وظيفة ولي الأمر الثاني (اختياري)
+  area?: string;
+  phone: string;
+  // Primary Guardian
+  parentName: string;
+  parentRelation?: string;
+  parentPhone: string;
+  parentJob?: string;
+  // Secondary Guardian
+  parent2Name?: string;
+  parent2Relation?: string;
+  parent2Phone?: string;
+  parent2Job?: string;
   address?: string;
   notes?: string;
   gender: 'boy' | 'girl';
-  secondaryStages?: Stage[]; // مراحل وأنشطة إضافية للمخدوم (مثل: كورال، شمامسة، نادي، إلخ)
   createdAt: string;
 }
 
 export interface Servant {
   id: string;
   name: string;
-  assignedStage: Stage; // المرحلة الأساسية
-  assignedStages?: Stage[]; // المراحل المتعددة التي يخدم بها الخادم
+  assignedStage: Stage;
+  assignedStages?: Stage[];
+  assignments?: ClassAssignment[];
   area?: string;
   phone: string;
   job?: string;
   birthDate: string;
   birthMonth: number;
-  roleTitle?: string; // أمين مرحلة / أمين مساعد / خادم مرحلة / خادم عام
-  roleType?: 'captain' | 'first_mate' | 'crew' | 'general_dock'; // الدور التنظيمي
+  roleTitle?: string;
+  roleType?: 'captain' | 'first_mate' | 'crew' | 'general_dock';
   email?: string;
   notes?: string;
-  is_directory_visible?: boolean; // حقل التحكم بالرؤية في الدليل (افتراضياً true، ويصبح false للإدارة العليا وأمين الخدمة العام)
+  is_directory_visible?: boolean;
   createdAt: string;
 }
 
@@ -108,56 +171,72 @@ export interface Supervisor {
   supervisedStage?: Stage;
   assignedStage?: Stage;
   title?: string;
-  isAssistant?: boolean; // هل هو مساعد أمين خدمة
+  isAssistant?: boolean;
   roleType?: 'supervisor' | 'assistant_supervisor';
   area?: string;
   phone: string;
-  job?: string; // الوظيفة
+  job?: string;
   birthDate?: string;
   birthMonth?: number;
   email?: string;
   notes?: string;
-  is_directory_visible?: boolean; // حقل التحكم بالرؤية في الدليل
+  is_directory_visible?: boolean;
   createdAt: string;
 }
 
-export type BookCategory = 'khedma' | 'mahrajan' | 'aqeda_taqs' | 'bible' | string;
+export type BookCategory =
+  | 'spiritual'
+  | 'preparation'
+  | 'khedma'
+  | 'mahrajan'
+  | 'aqeda_taqs'
+  | 'bible'
+  | string;
+
+export type BookVisibility = 'all' | 'specific_stages';
 
 export interface Book {
   id: string;
   title: string;
-  category: BookCategory; // كتب الخدمة، المهرجان، العقيدة والطقس، الكتاب المقدس
-  targetStage: Stage; // المرحلة الرئيسية للتوافق
-  targetStages?: Stage[]; // المراحل التي يظهر لها هذا الكتاب (يمكن أن يظهر لأكثر من مرحلة أو عامة)
+  category: BookCategory;
+  visibility?: BookVisibility;
+  targetStage: Stage;
+  targetStages?: Stage[];
   author?: string;
   year?: string;
   description: string;
-  contentSummary?: string; // ملخص المحتوى أو الفصول
-  pdfUrl?: string; // Data URL أو رابط ملف الـ PDF
-  pdfFileName?: string; // اسم ملف الـ PDF المرفق
-  pdfFileSize?: string; // حجم ملف الـ PDF
-  coverImage?: string; // Data URL أو رابط صورة غلاف الكتاب
-  fileUrl?: string; // للتوافق العكسي
-  coverBg?: string; // لون الغلاف للواجهة
+  contentSummary?: string;
+  pdfUrl?: string;
+  pdfFileName?: string;
+  pdfFileSize?: string;
+  coverImage?: string;
+  fileUrl?: string;
+  coverBg?: string;
   pageCount?: number;
 }
 
-export type ChildEventType = 'mass' | 'sunday_school' | 'festival';
+export type LibraryBook = Book;
+
+export type ChildEventType = 'mass' | 'sunday_school' | 'festival' | 'mahragan';
 export type StaffEventType = 'mass' | 'sunday_school' | 'general_meeting' | 'supervisors_meeting';
 export type EventType = ChildEventType | StaffEventType;
+export type AttendancePeriodType = 'weekly' | 'monthly' | 'seasonal_event';
 
 export interface AttendanceRecord {
   id: string;
   date: string; // YYYY-MM-DD
+  periodType?: AttendancePeriodType;
   targetType: 'child' | 'servant' | 'supervisor';
-  eventType: ChildEventType | StaffEventType;
-  records: Record<string, { status: AttendanceStatus; note?: string }>; // personId -> status & note
+  eventType: EventType;
+  recordedByUid?: string;
+  note?: string;
+  records: Record<string, { status: AttendanceStatus; note?: string; recordedByUid?: string }>;
 }
 
 export interface FilterState {
-  searchQuery: string; // searches name, area, phone, parent phone, parent name, job
-  stageFilter: string; // 'all' or specific stage
-  birthMonthFilter: string; // 'all' or 1..12
-  ageFilter: string; // 'all' or age
-  areaFilter: string; // 'all' or specific area
+  searchQuery: string;
+  stageFilter: string;
+  birthMonthFilter: string;
+  ageFilter: string;
+  areaFilter: string;
 }

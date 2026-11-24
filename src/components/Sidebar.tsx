@@ -117,7 +117,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Filter based on user role
   const isKhadem = role === 'khadem';
   const isAminFasl = role === 'amin_fasl';
-  const isAminAm = role === 'amin_khedma_am' || currentUser?.canManageSupervisors || currentUser?.username?.toLowerCase() === 'giovanni_ayman' || currentUser?.phone === '01203385601';
+  const isAminAm = role === 'amin_khedma_am' || currentUser?.canManageSupervisors;
   const isGeneralServant = isKhadem && (!currentUser?.assignedStage || currentUser?.assignedStage === 'عامة');
 
   const canShowItem = (item: NavItem) => {
@@ -455,16 +455,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* PWA Install shortcut button */}
           <PWAInstallButton variant="sidebar" />
 
-          {/* Utility Row: Theme Switcher & Reset in a clean single strip */}
+          {/* Utility Row: Theme Switcher & Admin-Only Reset in a clean single strip */}
           <div className="flex items-center justify-between pt-1 border-t border-[#260a16] text-[11px]">
             <ThemeToggle variant="full" />
-            <button
-              onClick={() => setShowResetConfirm(true)}
-              className="p-1.5 rounded-lg text-stone-400 hover:text-stone-200 hover:bg-[#280e1a] transition-colors cursor-pointer"
-              title="استعادة البيانات الافتراضية"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-            </button>
+            {role === 'amin_khedma_am' && (
+              <button
+                onClick={() => setShowResetConfirm(true)}
+                className="p-1.5 rounded-lg text-stone-400 hover:text-stone-200 hover:bg-[#280e1a] transition-colors cursor-pointer"
+                title="استعادة البيانات الافتراضية"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </div>
 

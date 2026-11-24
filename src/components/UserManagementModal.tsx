@@ -136,12 +136,12 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
     try {
       // Find matching user from current user or users list
       const isCurrent = cleanUser === (currentUser?.username || '').trim().toLowerCase();
-      const currentPassValid = isCurrent && (await verifyPassword(cleanPass, currentUser?.password) || cleanPass === '123' || cleanPass === '123456');
+      const currentPassValid = isCurrent && await verifyPassword(cleanPass, currentUser?.password);
 
       // Or check if entered credentials match amin_khedma_am
       const aminUser = users.find(u => u.role === 'amin_khedma_am');
       const isAminUser = cleanUser === (aminUser?.username || '').trim().toLowerCase();
-      const aminPassValid = isAminUser && (await verifyPassword(cleanPass, aminUser?.password) || cleanPass === '123' || cleanPass === '123456');
+      const aminPassValid = isAminUser && await verifyPassword(cleanPass, aminUser?.password);
 
       if (!currentPassValid && !aminPassValid) {
         setGateError('❌ بيانات الاعتماد غير صحيحة! يرجى إدخال اسم المستخدم وكلمة السر الصحيحة للتأكيد الأمني.');

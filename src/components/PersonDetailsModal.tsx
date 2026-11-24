@@ -29,6 +29,7 @@ export const PersonDetailsModal: React.FC<PersonDetailsModalProps> = ({
   onViewAttendanceHistory
 }) => {
   const { attendance } = useApp();
+  const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
 
   if (!isOpen || !person) return null;
 
@@ -38,7 +39,6 @@ export const PersonDetailsModal: React.FC<PersonDetailsModalProps> = ({
 
   const child = isChild ? (person as Child) : null;
   const servant = isServant ? (person as Servant) : null;
-  const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
   const supervisor = isSupervisor ? (person as Supervisor) : null;
 
   const stage = child?.stage || servant?.assignedStage || supervisor?.supervisedStage || supervisor?.assignedStage || 'عامة';

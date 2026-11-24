@@ -28,7 +28,7 @@ export const SupervisorsDirectoryTab: React.FC<{
 
   const filteredSupervisors = supervisors.filter(sup => {
     if (sup.is_directory_visible === false) return false;
-    if (sup.title?.includes('أمين الخدمة العام') || sup.name === 'أ/ بيشوي جرجس') return false;
+    if (sup.title?.includes('أمين الخدمة العام')) return false;
 
     const isAssistant = !!(sup.isAssistant || sup.roleType === 'assistant_supervisor');
 
@@ -355,6 +355,14 @@ export const SupervisorsDirectoryTab: React.FC<{
           onClose={() => setSelectedDetailsSup(null)}
           person={selectedDetailsSup}
           type="supervisor"
+          onEdit={(sup) => {
+            setSelectedDetailsSup(null);
+            onEditSupervisor(sup as Supervisor);
+          }}
+          onDelete={(id) => {
+            deleteSupervisor(id);
+            setSelectedDetailsSup(null);
+          }}
         />
       )}
 

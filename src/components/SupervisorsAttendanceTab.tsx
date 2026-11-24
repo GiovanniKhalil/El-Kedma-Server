@@ -655,8 +655,8 @@ export const SupervisorsAttendanceTab: React.FC = () => {
                           </span>
                         )}
 
-                        <span className={`px-2.5 py-0.5 rounded-lg text-xs font-black border ${getStageBadgeClass(sup.assignedStage)} shrink-0`}>
-                          {sup.assignedStage}
+                        <span className={`px-2.5 py-0.5 rounded-lg text-xs font-black border ${getStageBadgeClass(sup.assignedStage || sup.supervisedStage || '')} shrink-0`}>
+                          {sup.assignedStage || sup.supervisedStage || 'عامة'}
                         </span>
                       </div>
 

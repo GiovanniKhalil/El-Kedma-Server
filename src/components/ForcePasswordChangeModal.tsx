@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { updateFirebaseUserPassword } from '../firebase';
+import { updateFirebaseUserPassword, formatSafeFirebasePass } from '../firebase';
 import { ShieldAlert, KeyRound, Eye, EyeOff, CheckCircle2, Lock, LogOut } from 'lucide-react';
 
 export const ForcePasswordChangeModal: React.FC = () => {
@@ -35,7 +35,7 @@ export const ForcePasswordChangeModal: React.FC = () => {
     try {
       // 1. Update Firebase Auth password if authenticated
       try {
-        await updateFirebaseUserPassword(cleanPass);
+        await updateFirebaseUserPassword(formatSafeFirebasePass(cleanPass));
       } catch (authErr: any) {
         console.warn('Firebase Auth update password notice:', authErr.message);
       }

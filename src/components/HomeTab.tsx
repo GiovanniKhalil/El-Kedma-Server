@@ -5,7 +5,7 @@ import { STAGES, MONTHS } from '../data/mockData';
 import { 
   Bell, Calendar, Users, BookOpen, UserCheck, Cake, Sparkles, Plus, Trash2, 
   ChevronLeft, ShieldCheck, Phone, MessageCircle, AlertCircle, Clock, Gift,
-  CheckCircle2, Flame, MapPin, Layers, Cross, ArrowUpRight, X
+  Flame, MapPin, Layers, Cross, ArrowUpRight, X
 } from 'lucide-react';
 
 import { parseBirthDate } from './BirthdayWidget';
@@ -19,13 +19,11 @@ export const HomeTab: React.FC<{
   const { 
     currentUser, role, selectedStageScope, setSelectedStageScope, 
     children, servants, books, attendance, notifications, 
-    addNotification, deleteNotification, setActiveTab, stagesList,
-    markAttendance, getAttendanceRecord
+    addNotification, deleteNotification, setActiveTab, stagesList
   } = useApp();
 
   // State for Add Notification Modal
   const [isAddNotifOpen, setIsAddNotifOpen] = useState(false);
-  const [selfAttNotice, setSelfAttNotice] = useState<string | null>(null);
   const [notifForm, setNotifForm] = useState({
     title: '',
     description: '',
@@ -34,24 +32,6 @@ export const HomeTab: React.FC<{
     targetStage: (selectedStageScope === 'all' ? 'عامة' : selectedStageScope) as Stage,
     type: 'event' as 'event' | 'alert' | 'spiritual' | 'meeting'
   });
-
-  // Current servant record
-  const currentServant = servants.find(s => 
-    s.name === currentUser?.name || 
-    (currentUser?.phone && s.phone === currentUser?.phone)
-  );
-
-  const todayDateStr = new Date().toISOString().split('T')[0];
-  const myTodayRecord = currentServant 
-    ? getAttendanceRecord('servant', 'general_meeting', todayDateStr)?.records[currentServant.id] 
-    : undefined;
-
-  const handleSelfCheckIn = (status: 'present' | 'excused') => {
-    if (!currentServant) return;
-    markAttendance('servant', 'general_meeting', todayDateStr, currentServant.id, status, status === 'present' ? 'تسجيل ذاتي حاضر' : 'اعتذار شخصي');
-    setSelfAttNotice(status === 'present' ? 'تم تسجيل حضورك اليوم بنجاح باركك الرب!' : 'تم تسجيل اعتذارك عن الحضور اليوم.');
-    setTimeout(() => setSelfAttNotice(null), 4000);
-  };
 
   // Filtered children and servants by selected stage scope
   const filteredChildren = selectedStageScope === 'all' 
@@ -206,14 +186,6 @@ export const HomeTab: React.FC<{
         </div>
       </div>
 
-      {/* Self-attendance notification alert */}
-      {selfAttNotice && (
-        <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200 text-xs font-bold flex items-center gap-2 animate-in fade-in">
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-          <span>{selfAttNotice}</span>
-        </div>
-      )}
-
       {/* Bento Grid Top Section */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
         
@@ -228,7 +200,7 @@ export const HomeTab: React.FC<{
               <p className="text-[11px] text-slate-500 dark:text-stone-400">بيانات المخدومين والخدام ونسب الحضور</p>
             </div>
             <div className="flex items-center gap-2">
-              {(role === 'amin_khedma_am' || currentUser?.canManageSupervisors || currentUser?.username?.toLowerCase() === 'giovanni_ayman' || currentUser?.phone === '01203385601') && onOpenUserManagement && (
+              {(role === 'amin_khedma_am' || currentUser?.canManageSupervisors) && onOpenUserManagement && (
                 <button
                   onClick={onOpenUserManagement}
                   className="px-3 py-1.5 bg-gradient-to-r from-burgundy-700 to-burgundy-800 hover:from-burgundy-800 hover:to-burgundy-900 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors border border-churchgold-400/30 cursor-pointer"
@@ -261,42 +233,6 @@ export const HomeTab: React.FC<{
               <div className="text-xs font-bold text-slate-500 dark:text-stone-400 mt-0.5">كتب ومناهج متوفرة</div>
             </div>
           </div>
-
-          {/* Quick Self-attendance Strip for Servant */}
-          {currentServant && (
-            <div className="mt-3 p-3 bg-amber-50/70 dark:bg-[#260f1b] rounded-2xl border border-amber-200/80 dark:border-[#4d1d2c] flex flex-col sm:flex-row items-center justify-between gap-2.5 text-xs">
-              <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-churchgold-600 dark:text-churchgold-400" />
-                <span className="font-bold text-slate-900 dark:text-stone-100">تسجيل حضوري الذاتي اليوم:</span>
-                {myTodayRecord?.status === 'present' ? (
-                  <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-extrabold text-[11px]">
-                    ✓ مسجل حاضر اليوم
-                  </span>
-                ) : myTodayRecord?.status === 'excused' ? (
-                  <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-extrabold text-[11px]">
-                    مُسجل معتذر
-                  </span>
-                ) : (
-                  <span className="text-slate-500 text-[11px]">لم تسجل حضورك بعد</span>
-                )}
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => handleSelfCheckIn('present')}
-                  className="px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-2xs transition-colors cursor-pointer"
-                >
-                  أنا حاضر اليوم
-                </button>
-                <button
-                  onClick={() => handleSelfCheckIn('excused')}
-                  className="px-2.5 py-1 rounded-xl bg-slate-200 dark:bg-[#341121] hover:bg-slate-300 text-slate-700 dark:text-stone-300 font-bold text-xs transition-colors cursor-pointer"
-                >
-                  اعتذار
-                </button>
-              </div>
-            </div>
-          )}
 
           <div className="pt-3 border-t border-amber-100/60 dark:border-[#33111d] flex items-center justify-between text-xs text-slate-500 dark:text-stone-400 mt-2">
             <span>المرحلة المختارة: <strong className="text-burgundy-700 dark:text-churchgold-300">{selectedStageScope === 'all' ? 'كافة المراحل والخدمات' : selectedStageScope}</strong></span>

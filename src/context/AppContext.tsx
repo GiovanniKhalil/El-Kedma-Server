@@ -39,7 +39,8 @@ import {
 } from '../services/firestoreService';
 import { 
   loginWithFirebaseAuth, 
-  updateFirebaseUserPassword, 
+  updateFirebaseUserPassword,
+  formatSafeFirebasePass,
   logoutFirebaseAuth,
   setFirestoreUserWithMerge,
   deleteFirestoreUser
@@ -86,8 +87,8 @@ interface AppContextType {
     username: string;
     password?: string;
     phone: string;
-    area: string;
-    job: string;
+    area?: string;
+    job?: string;
     birthDate: string;
     assignedStage: string;
     notes?: string;
@@ -195,18 +196,6 @@ const defaultFilters: FilterState = {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-export const PRIMARY_ADMIN_USER: AppUser = {
-  id: 'u_admin',
-  username: 'admin',
-  name: 'أ/ بيشوي جرجس',
-  role: 'amin_khedma_am',
-  assignedStage: 'عامة',
-  isTempPassword: false,
-  password: 'sha256:5e083407fa5280b8682f36a267e74182739b911da75219628f05ab592aa9417a', // encrypted '123'
-  phone: '01223456789',
-  createdAt: '2025-01-01'
-};
-
 const ensureEncryptedUsers = (rawUsers: AppUser[]): AppUser[] => {
   return rawUsers.map(u => {
     if (u.password && !isPasswordEncrypted(u.password)) {
@@ -217,30 +206,24 @@ const ensureEncryptedUsers = (rawUsers: AppUser[]): AppUser[] => {
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children: childrenProps }) => {
-  // Users state: initialized from storage or defaults strictly to the protected primary admin account
+  // Users state: initialized from local storage without injecting hardcoded accounts
   const [users, setUsers] = useState<AppUser[]>(() => {
     const saved = localStorage.getItem('church_app_users');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const sanitized = ensureEncryptedUsers(parsed).map(u => {
+        if (Array.isArray(parsed)) {
+          return ensureEncryptedUsers(parsed).map(u => {
             const copy = { ...u };
             delete (copy as any).canManageSupervisors;
             return copy;
           });
-          if (!sanitized.some(u => u.role === 'amin_khedma_am')) {
-            sanitized.unshift(PRIMARY_ADMIN_USER);
-          }
-          return sanitized;
         }
       } catch (e) {
-        // Fallback to primary admin
+        return [];
       }
     }
-    const initialAdminList = [PRIMARY_ADMIN_USER];
-    localStorage.setItem('church_app_users', JSON.stringify(initialAdminList));
-    return initialAdminList;
+    return [];
   });
 
   // Logged-in current user (starts null so it always opens on Registration page per requirement)
@@ -522,11 +505,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       }
     });
 
-    return loaded.filter(s => 
-      s.name !== 'أ/ بيشوي جرجس' && 
-      s.phone !== '01223456789' && 
-      !s.roleTitle?.includes('أمين الخدمة العام')
-    );
+    return loaded.filter(s => !s.roleTitle?.includes('أمين الخدمة العام'));
   });
 
   // Library Books state: defaults to []
@@ -690,7 +669,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
           // Build updated users list solely from deduped Firestore users
           const mappedUsers: AppUser[] = dedupedFirestoreUsers.map(fu => {
             const rawUsername = (fu.username || fu.uid || '').trim();
-            const pass = fu.passwordHash || localPasswords.get(fu.uid) || localPasswords.get(rawUsername.toLowerCase()) || hashPasswordSync('123');
+            const pass = fu.passwordHash || localPasswords.get(fu.uid) || localPasswords.get(rawUsername.toLowerCase()) || '';
             const prevUser = prev.find(p => p.id === fu.uid || p.username.toLowerCase() === rawUsername.toLowerCase());
 
             // Extract stage from Firestore
@@ -741,10 +720,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
           }
           const result: AppUser[] = Array.from(byUsername.values());
 
-          // Ensure fixed General Secretary account is always preserved
+          // Preserve an existing General Secretary from previous state only if missing in snapshot
           if (!result.some(u => u.role === 'amin_khedma_am')) {
-            const defaultAdmin = prev.find(u => u.role === 'amin_khedma_am') || PRIMARY_ADMIN_USER;
-            result.unshift(defaultAdmin);
+            const existingAdmin = prev.find(u => u.role === 'amin_khedma_am');
+            if (existingAdmin) {
+              result.unshift(existingAdmin);
+            }
           }
 
           localStorage.setItem('church_app_users', JSON.stringify(result));
@@ -973,29 +954,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     }
 
     if (!found) {
-      // Admin fallback if username is admin
-      if (cleanUsername === 'admin') {
-        const encrypted = await hashPassword(cleanPass);
-        found = {
-          id: 'u_admin',
-          username: 'admin',
-          name: 'أ/ بيشوي جرجس',
-          role: 'amin_khedma_am',
-          assignedStage: 'عامة',
-          isTempPassword: false,
-          phone: '',
-          password: encrypted
-        };
-      } else {
-        return { success: false, error: 'اسم المستخدم أو رقم الهاتف غير مسجل' };
-      }
+      return { success: false, error: 'اسم المستخدم أو رقم الهاتف غير مسجل' };
     }
 
-    // 3. Verify password with support for hash and fallback
-    let isPasswordMatch = await verifyPassword(cleanPass, found.password);
-    if (!isPasswordMatch && (cleanPass === '123' || cleanPass === '123456' || cleanPass === 'temp123')) {
-      isPasswordMatch = true;
-    }
+    // 3. Verify password strictly against stored hash
+    const isPasswordMatch = await verifyPassword(cleanPass, found.password);
 
     if (!isPasswordMatch) {
       return { success: false, error: 'اسم المستخدم أو كلمة السر غير صحيحة' };
@@ -1043,8 +1006,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     username: string;
     password?: string;
     phone: string;
-    area: string;
-    job: string;
+    area?: string;
+    job?: string;
     birthDate: string;
     assignedStage: string;
     notes?: string;
@@ -1063,7 +1026,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     const cleanUsername = data.username.trim();
 
     // 2. Strict Password Encryption (SHA-256 with Salt)
-    const rawPass = data.password && data.password.trim() ? data.password.trim() : '123456';
+    const rawPass = data.password ? data.password.trim() : '';
+    if (!rawPass) {
+      return { success: false, error: 'كلمة السر مطلوبة' };
+    }
     const encryptedPassword = await hashPassword(rawPass);
 
     const cleanStage = (data.assignedStage && data.assignedStage.trim() && data.assignedStage.trim() !== 'عامة') 
@@ -1198,7 +1164,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
 
     // Update Firebase Auth password
     try {
-      await updateFirebaseUserPassword(newPass.trim());
+      await updateFirebaseUserPassword(formatSafeFirebasePass(newPass.trim()));
     } catch (e) {
       console.warn('Firebase Auth update password notice:', e);
     }
@@ -1228,7 +1194,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       console.warn('Username validation warning:', usernameValidation.error);
     }
 
-    const rawPass = userData.password && userData.password.trim() ? userData.password.trim() : 'temp123';
+    const rawPass = userData.password && userData.password.trim()
+      ? userData.password.trim()
+      : ('tmp_' + Math.random().toString(36).slice(2, 10));
     const encryptedPassword = await hashPassword(rawPass);
 
     const newUser: AppUser = {
@@ -1306,13 +1274,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     )) {
       const updatedCurr = { ...currentUser, ...updatedPayload };
       if (userData.assignedStage) {
-        updatedCurr.assignedStage = userData.assignedStage;
-        if (updatedCurr.role === 'amin_khedma_am' || !userData.assignedStage || userData.assignedStage === 'عامة' || userData.assignedStage === 'في انتظار التعيين') {
+        const nextStage = userData.assignedStage;
+        updatedCurr.assignedStage = nextStage;
+        if (updatedCurr.role === 'amin_khedma_am' || !nextStage || nextStage === 'عامة' || nextStage === 'في انتظار التعيين') {
           setSelectedStageScopeState('all');
           setFilters(prev => ({ ...prev, stageFilter: 'all' }));
         } else {
-          setSelectedStageScopeState(userData.assignedStage);
-          setFilters(prev => ({ ...prev, stageFilter: userData.assignedStage }));
+          setSelectedStageScopeState(nextStage);
+          setFilters(prev => ({ ...prev, stageFilter: nextStage }));
         }
       }
       setCurrentUser(updatedCurr);
@@ -1486,23 +1455,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
   };
 
   const resetUsersToDefault = () => {
-    const defaults = [PRIMARY_ADMIN_USER];
+    const existingAdmin = users.find(u => u.role === 'amin_khedma_am');
+    const defaults = existingAdmin ? [existingAdmin] : [];
     setUsers(defaults);
     localStorage.setItem('church_app_users', JSON.stringify(defaults));
     if (currentUser) {
-      const refreshed = defaults.find(u => u.username === currentUser.username) || PRIMARY_ADMIN_USER;
+      const refreshed = defaults.find(u => u.username === currentUser.username) || existingAdmin || null;
       setCurrentUser(refreshed);
-      setRoleState(refreshed.role);
+      if (refreshed) {
+        setRoleState(refreshed.role);
+      }
     }
   };
 
   const clearAllNonAdminUsers = async () => {
-    const adminUser = users.find(u => u.role === 'amin_khedma_am') || PRIMARY_ADMIN_USER;
-    const cleanedUsers = [adminUser];
+    const adminUser = users.find(u => u.role === 'amin_khedma_am');
+    const cleanedUsers = adminUser ? [adminUser] : [];
     setUsers(cleanedUsers);
     localStorage.setItem('church_app_users', JSON.stringify(cleanedUsers));
     try {
-      await clearAllNonAdminUsersFromFirestore(adminUser.id);
+      await clearAllNonAdminUsersFromFirestore(adminUser?.id || 'admin');
     } catch (err) {
       console.warn('Failed to clear non-admin users from Firestore:', err);
     }
@@ -2018,6 +1990,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     status: AttendanceStatus,
     note?: string
   ) => {
+    const recordedByUid = currentUser?.id || '';
+    // Anti-self-attendance invariant: no user can record their own attendance
+    if (recordedByUid && personId === recordedByUid) {
+      console.warn('Blocked self-attendance attempt for user:', recordedByUid);
+      return;
+    }
+
     setAttendance(prev => {
       const existingIndex = prev.findIndex(
         a => a.targetType === targetType && a.eventType === eventType && a.date === date
@@ -2026,9 +2005,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       if (existingIndex > -1) {
         const updated = [...prev];
         const recordObj = { ...updated[existingIndex].records };
-        recordObj[personId] = { status, note };
+        recordObj[personId] = { status, note, recordedByUid };
         updated[existingIndex] = {
           ...updated[existingIndex],
+          recordedByUid,
           records: recordObj
         };
         return updated;
@@ -2038,15 +2018,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
           date,
           targetType,
           eventType,
+          recordedByUid,
           records: {
-            [personId]: { status, note }
+            [personId]: { status, note, recordedByUid }
           }
         };
         return [...prev, newRecord];
       }
     });
 
-    // Firestore attendance collection: (date, month, personId, personType, eventType, status)
+    // Firestore attendance collection: (date, month, personId, personType, eventType, status, recordedByUid)
     try {
       const monthNum = parseInt(date.split('-')[1], 10) || (new Date().getMonth() + 1);
       await saveAttendanceToFirestore({
@@ -2055,7 +2036,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         personId,
         personType: targetType,
         eventType,
-        status
+        status,
+        recordedByUid,
+        ...(note ? { note } : {})
       });
     } catch (err) {
       console.warn('Failed to save attendance to Firestore:', err);
@@ -2069,20 +2052,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     personIds: string[],
     status: AttendanceStatus
   ) => {
+    const recordedByUid = currentUser?.id || '';
+    // Filter out currentUser's own ID to enforce targetId !== recordedByUid
+    const allowedPersonIds = recordedByUid
+      ? personIds.filter(id => id !== recordedByUid)
+      : personIds;
+
+    if (allowedPersonIds.length === 0) return;
+
     setAttendance(prev => {
       const existingIndex = prev.findIndex(
         a => a.targetType === targetType && a.eventType === eventType && a.date === date
       );
 
-      const recordsUpdate: Record<string, { status: AttendanceStatus; note?: string }> = {};
-      personIds.forEach(id => {
-        recordsUpdate[id] = { status };
+      const recordsUpdate: Record<string, { status: AttendanceStatus; note?: string; recordedByUid?: string }> = {};
+      allowedPersonIds.forEach(id => {
+        recordsUpdate[id] = { status, recordedByUid };
       });
 
       if (existingIndex > -1) {
         const updated = [...prev];
         updated[existingIndex] = {
           ...updated[existingIndex],
+          recordedByUid,
           records: {
             ...updated[existingIndex].records,
             ...recordsUpdate
@@ -2095,6 +2087,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
           date,
           targetType,
           eventType,
+          recordedByUid,
           records: recordsUpdate
         };
         return [...prev, newRecord];
@@ -2104,13 +2097,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     // Batch persist to Firestore `attendance`
     try {
       const monthNum = parseInt(date.split('-')[1], 10) || (new Date().getMonth() + 1);
-      const entries = personIds.map(pId => ({
+      const entries = allowedPersonIds.map(pId => ({
         date,
         month: monthNum,
         personId: pId,
         personType: targetType,
         eventType,
-        status
+        status,
+        recordedByUid
       }));
       await batchSaveAttendanceToFirestore(entries);
     } catch (err) {
@@ -2191,10 +2185,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
   };
 
   const resetToDefaultData = () => {
+    // Strictly restricted to General Secretary (amin_khedma_am)
+    if (currentUser?.role !== 'amin_khedma_am') {
+      console.warn('Unauthorized resetToDefaultData blocked: requires amin_khedma_am role.');
+      return;
+    }
     const currentTheme = theme;
+    const existingAdmin = users.find(u => u.role === 'amin_khedma_am') || currentUser;
+    const preservedUsers = existingAdmin ? [existingAdmin] : [];
     setStagesList(DEFAULT_STAGES);
-    setUsers([PRIMARY_ADMIN_USER]);
-    setCurrentUser(PRIMARY_ADMIN_USER);
+    setUsers(preservedUsers);
+    setCurrentUser(existingAdmin);
     setNotifications([]);
     setChildren([]);
     setServants([]);
@@ -2203,7 +2204,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     setAttendance([]);
     localStorage.clear();
     localStorage.setItem('church_app_theme', currentTheme);
-    localStorage.setItem('church_app_users', JSON.stringify([PRIMARY_ADMIN_USER]));
+    localStorage.setItem('church_app_users', JSON.stringify(preservedUsers));
   };
 
   // 1. Unassign all servants and supervisors from classes & turn them into general servants

@@ -11,7 +11,7 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon.svg', 'logo.jpg', 'church_logo.jpg'],
+        includeAssets: ['apple-touch-icon.png', 'icon.svg', 'logo.jpg', 'church_logo.jpg'],
         manifest: {
           id: '/',
           name: 'كنيسة ماريوحنا بالمعراج التربية الكنسية',
@@ -79,6 +79,7 @@ export default defineConfig(() => {
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg,woff,woff2}'],
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+          navigateFallbackDenylist: [/^\/api\//],
         },
         devOptions: {
           enabled: true,

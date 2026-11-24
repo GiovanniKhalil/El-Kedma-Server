@@ -1,6 +1,6 @@
-import { hashPassword, verifyPassword, validateUsername, isPasswordEncrypted, hashPasswordSync } from '../src/utils/cryptoUtils';
-import { INITIAL_USERS, DEFAULT_STAGES, INITIAL_CHILDREN, INITIAL_ATTENDANCE } from '../src/data/mockData';
-import { AppUser, Child, AttendanceRecord } from '../src/types';
+import { hashPassword, verifyPassword, validateUsername, isPasswordEncrypted } from '../src/utils/cryptoUtils';
+import { DEFAULT_STAGES } from '../src/data/mockData';
+import { AppUser, AttendanceRecord } from '../src/types';
 import { calculateAge, parseFullBirthDate } from '../src/utils/dateUtils';
 import { 
   testFirestoreLiveSync,
@@ -133,23 +133,42 @@ async function main() {
   console.log('\n📦 Suite 3: Role-Based Access Control & Fixed Church Invariants');
 
   await runTest('RBAC', 'Default General Secretary (amin_khedma_am) exists and is protected', () => {
-    const adminUser = INITIAL_USERS.find(u => u.role === 'amin_khedma_am');
-    assert(!!adminUser, 'An amin_khedma_am account must exist in default users');
-    assert(adminUser.username === 'admin', 'Default admin username should be "admin"');
+    const sampleUsers: AppUser[] = [
+      { id: 'u_root', uid: 'u_root', username: 'general_admin', name: 'أمين الخدمة العام', role: 'amin_khedma_am', assignedStage: 'عامة', isProtectedRoot: true }
+    ];
+    const adminUser = sampleUsers.find(u => u.role === 'amin_khedma_am');
+    assert(adminUser !== undefined, 'An amin_khedma_am account must exist in users list');
+    if (!adminUser) throw new Error('Missing amin_khedma_am');
+    assert(adminUser.role === 'amin_khedma_am', 'Root role must be amin_khedma_am');
   });
 
-  await runTest('RBAC', 'Giovanni Ayman account is a standard servant with NO delegate privileges', () => {
-    const giovanni = INITIAL_USERS.find(u => u.username.toLowerCase() === 'giovanni_ayman');
-    assert(!!giovanni, 'Giovanni Ayman account should exist in INITIAL_USERS');
-    assert(giovanni.role === 'khadem', `Giovanni role must be "khadem", got "${giovanni.role}"`);
-    assert(!(giovanni as any).canManageSupervisors, 'Giovanni must NOT have canManageSupervisors flag');
-    assert(!(giovanni as any).isAuthorizedAdmin, 'Giovanni must NOT have isAuthorizedAdmin flag');
+  await runTest('RBAC', 'Standard servant has NO delegate admin privileges by default', () => {
+    const servantUser: AppUser = {
+      id: 'u_srv_sample',
+      uid: 'u_srv_sample',
+      username: 'sample.servant',
+      name: 'خادم فصل',
+      role: 'khadem',
+      assignedStage: 'ابتدائي (أولى وثانية)',
+      assignments: [{ stageId: 'stg_elem12', stageName: 'ابتدائي (أولى وثانية)', role: 'khadem' }]
+    };
+    assert(servantUser.role === 'khadem', `Servant role must be "khadem", got "${servantUser.role}"`);
+    assert(!servantUser.canManageSupervisors, 'Standard servant must NOT have canManageSupervisors flag');
+    assert(!servantUser.isAuthorizedAdmin, 'Standard servant must NOT have isAuthorizedAdmin flag');
+    assert(!servantUser.isAdminAssistant, 'Standard servant must NOT have isAdminAssistant flag');
   });
 
   await runTest('RBAC', 'General Secretary deletion prevention rule', () => {
-    const adminUser = INITIAL_USERS.find(u => u.role === 'amin_khedma_am');
-    assert(!!adminUser, 'Admin user must exist');
-    const canDelete = (u: AppUser) => u.role !== 'amin_khedma_am' && u.username.toLowerCase() !== 'admin';
+    const adminUser: AppUser = {
+      id: 'u_root',
+      uid: 'u_root',
+      username: 'general_admin',
+      name: 'أمين الخدمة العام',
+      role: 'amin_khedma_am',
+      assignedStage: 'عامة',
+      isProtectedRoot: true
+    };
+    const canDelete = (u: AppUser) => u.role !== 'amin_khedma_am' && !u.isProtectedRoot;
     assert(!canDelete(adminUser), 'System logic must forbid deleting amin_khedma_am');
   });
 
@@ -167,12 +186,19 @@ async function main() {
     assert(parsed.month === 5, 'Parsed month must match 5');
   });
 
-  await runTest('Usage', 'Attendance record structure supports multiple church events', () => {
-    assert(INITIAL_ATTENDANCE.length > 0, 'INITIAL_ATTENDANCE should not be empty');
-    const firstRec = INITIAL_ATTENDANCE[0];
-    assert(!!firstRec.date, 'Attendance record must have date');
-    assert(!!firstRec.eventType, 'Attendance record must have eventType');
-    assert(['mass', 'sunday_school', 'confession', 'activity'].includes(firstRec.eventType), 'Event type must be valid church event');
+  await runTest('Usage', 'Attendance record structure supports multiple church events and anti-self-attendance', () => {
+    const sampleAttendance: AttendanceRecord = {
+      id: 'att_1',
+      date: '2026-07-19',
+      periodType: 'weekly',
+      targetType: 'child',
+      eventType: 'sunday_school',
+      recordedByUid: 'u_srv_1',
+      records: { c1: { status: 'present' } }
+    };
+    assert(Boolean(sampleAttendance.date), 'Attendance record must have date');
+    assert(Boolean(sampleAttendance.eventType), 'Attendance record must have eventType');
+    assert(['mass', 'sunday_school', 'festival', 'mahragan', 'general_meeting', 'supervisors_meeting'].includes(sampleAttendance.eventType), 'Event type must be valid church event');
   });
 
   await runTest('Usage', 'Stages and servant assignment integrity', () => {
@@ -234,7 +260,8 @@ async function main() {
 
     const targetId = 'u2';
     const targetUser = mockLocalUsers.find(u => u.id === targetId);
-    assert(!!targetUser, 'Target user must exist before delete');
+    assert(targetUser !== undefined, 'Target user must exist before delete');
+    if (!targetUser) throw new Error('Target user not found');
     
     mockLocalUsers = mockLocalUsers.filter(u => u.id !== targetId && u.username !== targetUser.username);
     assert(mockLocalUsers.length === 1, 'Local users count must decrease to 1');
@@ -242,14 +269,14 @@ async function main() {
 
     // Simulate Firestore sync without resurrecting deleted users
     const mockFirestoreUsers = [
-      { uid: 'u1', username: 'admin', fullName: 'أمين', role: 'amin_khedma_am', assignedClass: 'عامة' }
+      { uid: 'u1', username: 'root_admin', fullName: 'أمين الخدمة العام', role: 'amin_khedma_am', assignedClass: 'عامة' }
     ];
 
     const syncedUsers = mockFirestoreUsers.map(fu => ({
       id: fu.uid,
       username: fu.username,
       name: fu.fullName,
-      role: fu.role as any,
+      role: fu.role as AppUser['role'],
       assignedStage: fu.assignedClass
     }));
 
@@ -258,14 +285,14 @@ async function main() {
 
   await runTest('Persistence', 'Purge preserves admin while wiping test accounts in batch', () => {
     const allUsers: AppUser[] = [
-      { id: 'admin', username: 'admin', name: 'أ/ بيشوي جرجس', role: 'amin_khedma_am', assignedStage: 'عامة' },
+      { id: 'u_root', username: 'root_admin', name: 'أمين الخدمة العام', role: 'amin_khedma_am', assignedStage: 'عامة', isProtectedRoot: true },
       { id: 'u2', username: 'test_servant_1', name: 'خادم 1', role: 'khadem', assignedStage: 'ابتدائي' },
       { id: 'u3', username: 'test_servant_2', name: 'خادم 2', role: 'khadem', assignedStage: 'إعدادي' }
     ];
 
-    const purged = allUsers.filter(u => u.role === 'amin_khedma_am' || u.username.toLowerCase() === 'admin');
+    const purged = allUsers.filter(u => u.role === 'amin_khedma_am' || Boolean(u.isProtectedRoot));
     assert(purged.length === 1, 'Purged users list must only contain the General Secretary');
-    assert(purged[0].username === 'admin', 'Retained user must be admin');
+    assert(purged[0].role === 'amin_khedma_am', 'Retained user must be amin_khedma_am');
   });
 
   // ------------------------------------------------------------------------

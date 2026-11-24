@@ -259,14 +259,16 @@ function AppContent() {
             </div>
 
             <div className="flex items-center gap-4">
-              <button
-                onClick={() => setShowFooterResetConfirm(true)}
-                className="inline-flex items-center gap-1 text-stone-400 hover:text-burgundy-700 dark:hover:text-churchgold-300 font-bold transition-colors cursor-pointer"
-                title="إعادة ضبط البيانات للأصل"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>استعادة البيانات الافتراضية</span>
-              </button>
+              {role === 'amin_khedma_am' && (
+                <button
+                  onClick={() => setShowFooterResetConfirm(true)}
+                  className="inline-flex items-center gap-1 text-stone-400 hover:text-burgundy-700 dark:hover:text-churchgold-300 font-bold transition-colors cursor-pointer"
+                  title="إعادة ضبط البيانات للأصل"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>استعادة البيانات الافتراضية</span>
+                </button>
+              )}
             </div>
           </div>
         </footer>

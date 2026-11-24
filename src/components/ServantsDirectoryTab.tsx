@@ -106,7 +106,7 @@ export const ServantsDirectoryTab: React.FC<{
 
   const filteredServants = servants.filter(servant => {
     if (servant.is_directory_visible === false) return false;
-    if (servant.roleTitle?.includes('أمين الخدمة العام') || servant.name === 'أ/ بيشوي جرجس') return false;
+    if (servant.roleTitle?.includes('أمين الخدمة العام')) return false;
 
     // 1. أمين المرحلة ومساعد الأمين يرى فقط خدام مرحلته الذين يخدمون معه
     if (role === 'amin_fasl') {
@@ -544,7 +544,7 @@ export const ServantsDirectoryTab: React.FC<{
                       <button
                         onClick={() => handleResetPassword(servant)}
                         className="p-1.5 rounded-lg bg-amber-50 dark:bg-[#28131d] text-amber-700 dark:text-churchgold-300 hover:bg-amber-100 dark:hover:bg-[#3d192c] border border-amber-300/70 dark:border-[#541e33] transition-colors cursor-pointer"
-                        title="تصفير كلمة السر لـ temp123"
+                        title="تصفير كلمة السر وإصدار كلمة مؤقتة"
                       >
                         <KeyRound className="w-3.5 h-3.5" />
                       </button>
@@ -869,7 +869,7 @@ export const ServantsDirectoryTab: React.FC<{
             <div className="flex items-center gap-3 pt-2">
               <button
                 onClick={() => {
-                  const tempPass = 'temp123';
+                  const tempPass = 'tmp_' + Math.floor(100000 + Math.random() * 900000);
                   resetUserTempPassword(servantToResetPass.id, tempPass);
                   setResetNotice({ servantName: servantToResetPass.name, tempPass });
                   setTimeout(() => setResetNotice(null), 8000);

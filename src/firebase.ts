@@ -102,7 +102,8 @@ export async function updateFirebaseUserPassword(newPass: string): Promise<void>
   if (!auth.currentUser) {
     throw new Error('لا يوجد مستخدم مسجل الدخول حالياً');
   }
-  await updatePassword(auth.currentUser, newPass);
+  const securePass = formatSafeFirebasePass(newPass);
+  await updatePassword(auth.currentUser, securePass);
 }
 
 // Helper for Sign Out

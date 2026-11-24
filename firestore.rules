@@ -2,34 +2,270 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Test connection doc
-    match /test/{docId} {
-      allow read, write: if true;
+    // Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
     }
 
-    // Users collection: servants & supervisors (allows full read/write for auth & directory)
+    // =========================================================================
+    // Core Auth, Path & Schema Primitives
+    // =========================================================================
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_.\\-]+$');
+    }
+
+    // Non-anonymous authenticated session required
+    function isAuthenticated() {
+      return request.auth != null &&
+        request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    function hasCallerDoc() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function callerRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAminKhedmaAm() {
+      return hasCallerDoc() && callerRole() == 'amin_khedma_am';
+    }
+
+    function isAminFaslOrAbove() {
+      return hasCallerDoc() && (
+        callerRole() == 'amin_khedma_am' ||
+        callerRole() == 'amin_fasl' ||
+        callerRole() == 'mosaed_amin'
+      );
+    }
+
+    // Prevent modifying immutable audit/ownership fields
+    function immutableAuditFields() {
+      return (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt) &&
+        (!('ownerUid' in existing()) || incoming().ownerUid == existing().ownerUid);
+    }
+
+    // =========================================================================
+    // Entity Validation Helpers (No existing() or diff() inside create helpers)
+    // =========================================================================
+
+    function isValidUserPayload(data) {
+      return data.keys().hasAll(['uid', 'fullName', 'role']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+        data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 120 &&
+        data.role is string &&
+        data.role in ['amin_khedma_am', 'amin_fasl', 'mosaed_amin', 'khadem', 'general_dock'] &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 24)) &&
+        (!('username' in data) || (data.username is string && data.username.size() <= 50)) &&
+        (!('assignedClass' in data) || (data.assignedClass is string && data.assignedClass.size() <= 100)) &&
+        (!('assignedStage' in data) || (data.assignedStage is string && data.assignedStage.size() <= 100)) &&
+        (!('assignments' in data) || (data.assignments is list && data.assignments.size() <= 20)) &&
+        (!('isProtectedRoot' in data) || data.isProtectedRoot is bool) &&
+        (!('isAdminAssistant' in data) || data.isAdminAssistant is bool) &&
+        (!('canAssignMakhdomeen' in data) || data.canAssignMakhdomeen is bool) &&
+        (!('mustChangePassword' in data) || data.mustChangePassword is bool) &&
+        (!('isFirstLogin' in data) || data.isFirstLogin is bool);
+    }
+
+    function isValidPendingRegistration(data) {
+      return data.keys().hasAll(['fullName', 'username', 'phone', 'status', 'createdAt']) &&
+        data.keys().hasOnly(['fullName', 'username', 'phone', 'birthDate', 'notes', 'status', 'createdAt']) &&
+        data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 120 &&
+        data.username is string && data.username.size() >= 3 && data.username.size() <= 50 &&
+        data.phone is string && data.phone.size() >= 6 && data.phone.size() <= 24 &&
+        data.status is string && data.status in ['pending', 'approved', 'rejected'] &&
+        data.createdAt is string && data.createdAt.size() <= 40 &&
+        (!('birthDate' in data) || (data.birthDate is string && data.birthDate.size() <= 20)) &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 500));
+    }
+
+    function isValidMakhdoom(data) {
+      return data.keys().hasAll(['fullName', 'stage']) &&
+        data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 120 &&
+        data.stage is string && data.stage.size() >= 1 && data.stage.size() <= 100 &&
+        (!('birthDate' in data) || (data.birthDate is string && data.birthDate.size() <= 20)) &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 24)) &&
+        (!('parentPhone' in data) || (data.parentPhone is string && data.parentPhone.size() <= 24)) &&
+        (!('parent2Phone' in data) || (data.parent2Phone is string && data.parent2Phone.size() <= 24)) &&
+        (!('secondaryStages' in data) || (data.secondaryStages is list && data.secondaryStages.size() <= 15));
+    }
+
+    function isValidAttendance(data) {
+      return data.keys().hasAll(['date', 'personId', 'personType', 'eventType', 'status']) &&
+        data.date is string && data.date.size() >= 8 && data.date.size() <= 20 &&
+        data.personId is string && data.personId.size() >= 1 && data.personId.size() <= 128 &&
+        data.personType is string && data.personType in ['child', 'servant', 'supervisor'] &&
+        data.eventType is string && data.eventType.size() <= 40 &&
+        data.status is string && data.status in ['present', 'absent', 'late', 'excused'] &&
+        (!('recordedByUid' in data) || (data.recordedByUid is string && data.recordedByUid.size() <= 128 && data.personId != data.recordedByUid)) &&
+        (!('periodType' in data) || (data.periodType is string && data.periodType in ['weekly', 'monthly', 'seasonal_event'])) &&
+        (!('note' in data) || (data.note is string && data.note.size() <= 400));
+    }
+
+    function isValidLibraryBook(data) {
+      return data.keys().hasAll(['title', 'category', 'targetGrade']) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 50 &&
+        data.targetGrade is string && data.targetGrade.size() >= 1 && data.targetGrade.size() <= 100 &&
+        (!('fileUrl' in data) || (data.fileUrl is string && data.fileUrl.size() <= 2000)) &&
+        (!('visibility' in data) || (data.visibility is string && data.visibility in ['all', 'specific_stages'])) &&
+        (!('targetStages' in data) || (data.targetStages is list && data.targetStages.size() <= 30));
+    }
+
+    function isValidAnnouncement(data) {
+      return data.keys().hasAll(['title', 'body']) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.body is string && data.body.size() >= 1 && data.body.size() <= 2000 &&
+        (!('targetScope' in data) || (data.targetScope is string && data.targetScope in ['all', 'general_dock', 'specific_stages'])) &&
+        (!('targetStages' in data) || (data.targetStages is list && data.targetStages.size() <= 30));
+    }
+
+    function isValidStage(data) {
+      return data.keys().hasAll(['id', 'name']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 100;
+    }
+
+    function isValidSeasonalEvent(data) {
+      return data.keys().hasAll(['title', 'date']) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.date is string && data.date.size() >= 8 && data.date.size() <= 20;
+    }
+
+    // =========================================================================
+    // Collection Rules (Zero Unauthenticated Reads, Protected Root & Anti-Escalation)
+    // =========================================================================
+
+    // Users collection
     match /users/{userId} {
-      allow read, write: if true;
+      allow get: if isValidId(userId) && isAuthenticated();
+      allow list: if isAuthenticated() && resource.data.uid is string;
+
+      allow create: if isValidId(userId) &&
+        isAuthenticated() &&
+        isValidUserPayload(incoming()) &&
+        (
+          isAminKhedmaAm() ||
+          (incoming().role in ['khadem', 'general_dock'] &&
+            incoming().get('isProtectedRoot', false) == false &&
+            incoming().get('isAdminAssistant', false) == false)
+        );
+
+      allow update: if isValidId(userId) &&
+        isAuthenticated() &&
+        isValidUserPayload(incoming()) &&
+        immutableAuditFields() &&
+        (
+          isAminKhedmaAm() ||
+          (
+            isAminFaslOrAbove() &&
+            existing().role != 'amin_khedma_am' &&
+            incoming().role in ['khadem', 'general_dock', 'mosaed_amin', 'amin_fasl'] &&
+            incoming().get('isProtectedRoot', false) == existing().get('isProtectedRoot', false) &&
+            incoming().get('isAdminAssistant', false) == existing().get('isAdminAssistant', false)
+          ) ||
+          (
+            (request.auth.uid == userId || existing().uid == request.auth.uid) &&
+            incoming().role == existing().role &&
+            incoming().get('isProtectedRoot', false) == existing().get('isProtectedRoot', false) &&
+            incoming().get('isAdminAssistant', false) == existing().get('isAdminAssistant', false) &&
+            incoming().get('canAssignMakhdomeen', false) == existing().get('canAssignMakhdomeen', false)
+          )
+        );
+
+      // Forbid deleting protected root / amin_khedma_am account
+      allow delete: if isValidId(userId) &&
+        isAminKhedmaAm() &&
+        existing().role != 'amin_khedma_am' &&
+        existing().get('isProtectedRoot', false) != true;
     }
 
-    // Makhdomeen collection: children records
+    // Isolated Pending Registrations Queue (New sign-up requests only; review strictly by amin_khedma_am)
+    match /pending_registrations/{regId} {
+      allow create: if isValidId(regId) &&
+        isValidPendingRegistration(incoming()) &&
+        incoming().status == 'pending';
+      allow get: if isValidId(regId) && isAminKhedmaAm();
+      allow list: if isAminKhedmaAm() && resource.data.status is string;
+      allow update: if isValidId(regId) &&
+        isAminKhedmaAm() &&
+        isValidPendingRegistration(incoming()) &&
+        immutableAuditFields();
+      allow delete: if isValidId(regId) && isAminKhedmaAm();
+    }
+
+    // Makhdomeen (Children) collection
     match /makhdomeen/{makhdoomId} {
-      allow read, write: if true;
+      allow get: if isValidId(makhdoomId) && isAuthenticated();
+      allow list: if isAuthenticated() && resource.data.fullName is string;
+      allow create: if isValidId(makhdoomId) && isAuthenticated() && isValidMakhdoom(incoming());
+      allow update: if isValidId(makhdoomId) && isAuthenticated() && isValidMakhdoom(incoming()) && immutableAuditFields();
+      allow delete: if isValidId(makhdoomId) && isAminFaslOrAbove();
     }
 
-    // Attendance collection: attendance events
+    // Attendance collection (Anti-self-attendance enforced)
     match /attendance/{attendanceId} {
-      allow read, write: if true;
+      allow get: if isValidId(attendanceId) && isAuthenticated();
+      allow list: if isAuthenticated() && resource.data.personId is string;
+      allow create: if isValidId(attendanceId) && isAuthenticated() && isValidAttendance(incoming());
+      allow update: if isValidId(attendanceId) && isAuthenticated() && isValidAttendance(incoming()) && immutableAuditFields();
+      allow delete: if isValidId(attendanceId) && isAminKhedmaAm();
     }
 
-    // Library collection: books & curricula
+    // Library collection
     match /library/{bookId} {
-      allow read, write: if true;
+      allow get: if isValidId(bookId) && isAuthenticated();
+      allow list: if isAuthenticated() && resource.data.title is string;
+      allow create: if isValidId(bookId) && isAuthenticated() && isValidLibraryBook(incoming());
+      allow update: if isValidId(bookId) && isAuthenticated() && isValidLibraryBook(incoming()) && immutableAuditFields();
+      allow delete: if isValidId(bookId) && isAminKhedmaAm();
     }
 
-    // Announcements collection: urgent church alerts
+    // Announcements collection
     match /announcements/{announcementId} {
-      allow read, write: if true;
+      allow get: if isValidId(announcementId) && isAuthenticated();
+      allow list: if isAuthenticated() && resource.data.title is string;
+      allow create: if isValidId(announcementId) && isAuthenticated() && isValidAnnouncement(incoming());
+      allow update: if isValidId(announcementId) && isAuthenticated() && isValidAnnouncement(incoming()) && immutableAuditFields();
+      allow delete: if isValidId(announcementId) && isAminFaslOrAbove();
+    }
+
+    // Stages collection
+    match /stages/{stageId} {
+      allow get: if isValidId(stageId) && isAuthenticated();
+      allow list: if isAuthenticated() && resource.data.name is string;
+      allow create: if isValidId(stageId) && isAminKhedmaAm() && isValidStage(incoming());
+      allow update: if isValidId(stageId) && isAminKhedmaAm() && isValidStage(incoming()) && immutableAuditFields();
+      allow delete: if isValidId(stageId) && isAminKhedmaAm();
+    }
+
+    // Seasonal events collection
+    match /seasonal_events/{eventId} {
+      allow get: if isValidId(eventId) && isAuthenticated();
+      allow list: if isAuthenticated() && resource.data.title is string;
+      allow create: if isValidId(eventId) && isAminFaslOrAbove() && isValidSeasonalEvent(incoming());
+      allow update: if isValidId(eventId) && isAminFaslOrAbove() && isValidSeasonalEvent(incoming()) && immutableAuditFields();
+      allow delete: if isValidId(eventId) && isAminKhedmaAm();
+    }
+
+    // Test connection doc (Authenticated non-anonymous only)
+    match /test/{docId} {
+      allow get: if isValidId(docId) && isAuthenticated();
+      allow list: if isAuthenticated() && resource.data.status is string;
+      allow create, update: if isValidId(docId) && isAuthenticated() &&
+        incoming().keys().hasOnly(['timestamp', 'clientCheck', 'status']);
+      allow delete: if isValidId(docId) && isAminKhedmaAm();
     }
   }
 }

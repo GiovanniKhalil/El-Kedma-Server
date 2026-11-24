@@ -1151,73 +1151,60 @@ export const INITIAL_ATTENDANCE: AttendanceRecord[] = [
 ];
 
 export const DEFAULT_STAGES: StageItem[] = [
-  { 
-    id: 'stg_hadana', 
-    name: 'حضانة', 
-    description: 'من سن 3 سنوات إلى 5 سنوات', 
-    supervisorName: 'أ/ مريم فؤاد', 
-    supervisorPhone: '01201122334',
-    assistantSupervisors: [
-      { name: 'خ/ إيرين عادل', phone: '01299887711' }
-    ]
+  {
+    id: 'stg_hadana',
+    name: 'حضانة',
+    description: 'من سن 3 سنوات إلى 5 سنوات',
+    supervisorName: '',
+    supervisorPhone: '',
+    assistantSupervisors: []
   },
-  { 
-    id: 'stg_elem12', 
-    name: 'ابتدائي (أولى وثانية)', 
-    description: 'الصفوف الأول والثاني الابتدائي', 
-    supervisorName: 'خ/ هاني نصيف', 
-    supervisorPhone: '01011223344',
-    assistantSupervisors: [
-      { name: 'خ/ مونيكا مجدي', phone: '01244556677' }
-    ]
+  {
+    id: 'stg_elem12',
+    name: 'ابتدائي (أولى وثانية)',
+    description: 'الصفوف الأول والثاني الابتدائي',
+    supervisorName: '',
+    supervisorPhone: '',
+    assistantSupervisors: []
   },
-  { 
-    id: 'stg_elem34', 
-    name: 'ابتدائي (ثالثة ورابعة)', 
-    description: 'الصفوف الثالث والرابع الابتدائي', 
-    supervisorName: 'خ/ بيتر أشرف', 
-    supervisorPhone: '01144556677',
-    assistantSupervisors: [
-      { name: 'خ/ مارينا مدحت', phone: '01288776655' }
-    ]
+  {
+    id: 'stg_elem34',
+    name: 'ابتدائي (ثالثة ورابعة)',
+    description: 'الصفوف الثالث والرابع الابتدائي',
+    supervisorName: '',
+    supervisorPhone: '',
+    assistantSupervisors: []
   },
-  { 
-    id: 'stg_elem56', 
-    name: 'ابتدائي (خامسة وسادسة)', 
-    description: 'الصفوف الخامس والسادس الابتدائي', 
-    supervisorName: 'أ/ هاني توفيق', 
-    supervisorPhone: '01222334455',
-    assistantSupervisors: [
-      { name: 'خ/ جرجس سمير', phone: '01066778899' }
-    ]
+  {
+    id: 'stg_elem56',
+    name: 'ابتدائي (خامسة وسادسة)',
+    description: 'الصفوف الخامس والسادس الابتدائي',
+    supervisorName: '',
+    supervisorPhone: '',
+    assistantSupervisors: []
   },
-  { 
-    id: 'stg_prep', 
-    name: 'إعدادي', 
-    description: 'المرحلة الإعدادية (أولى، ثانية، ثالثة)', 
-    supervisorName: 'أ/ مينا عادل', 
-    supervisorPhone: '01009876543',
-    assistantSupervisors: [
-      { name: 'خ/ كيرلس يوسف', phone: '01200112233' },
-      { name: 'خ/ مرقس حبيب', phone: '01122334466' }
-    ]
+  {
+    id: 'stg_prep',
+    name: 'إعدادي',
+    description: 'المرحلة الإعدادية (أولى، ثانية، ثالثة)',
+    supervisorName: '',
+    supervisorPhone: '',
+    assistantSupervisors: []
   },
-  { 
-    id: 'stg_sec', 
-    name: 'ثانوي', 
-    description: 'المرحلة الثانوية العامة', 
-    supervisorName: 'خ/ بيشوي نادري', 
-    supervisorPhone: '01233445566',
-    assistantSupervisors: [
-      { name: 'خ/ ساندرا إبراهيم', phone: '01199887766' }
-    ]
+  {
+    id: 'stg_sec',
+    name: 'ثانوي',
+    description: 'المرحلة الثانوية العامة',
+    supervisorName: '',
+    supervisorPhone: '',
+    assistantSupervisors: []
   },
-  { 
-    id: 'stg_general', 
-    name: 'عامة', 
-    description: 'كافة مراحل وقطاعات الخدمة', 
-    supervisorName: 'أ/ بيشوي جرجس', 
-    supervisorPhone: '01223456789',
+  {
+    id: 'stg_general',
+    name: 'عامة',
+    description: 'كافة مراحل وقطاعات الخدمة',
+    supervisorName: '',
+    supervisorPhone: '',
     assistantSupervisors: []
   }
 ];

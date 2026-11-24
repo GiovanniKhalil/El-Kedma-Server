@@ -23,12 +23,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
   // Forgot password mode state
   const [isForgotPass, setIsForgotPass] = useState(false);
   const [forgotUsername, setForgotUsername] = useState('');
+  const [forgotPhone, setForgotPhone] = useState('');
   const [forgotNewPass, setForgotNewPass] = useState('');
   const [forgotSuccess, setForgotSuccess] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isOpen) return null;
-
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,9 +95,22 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
     e.preventDefault();
     setError(null);
 
-    const targetUser = users.find(u => u.username.toLowerCase().trim() === forgotUsername.toLowerCase().trim());
+    const cleanUsername = forgotUsername.trim();
+    const cleanPhone = forgotPhone.trim().replace(/\s+/g, '');
+
+    if (!cleanUsername || !cleanPhone) {
+      setError('يرجى إدخال اسم المستخدم (مطابق لحالة الأحرف) ورقم الهاتف المسجل للتحقق');
+      return;
+    }
+
+    // Strict case-sensitive username equality + matching registered phone verification
+    const targetUser = users.find(u =>
+      u.username === cleanUsername &&
+      Boolean(u.phone) &&
+      (u.phone || '').replace(/\s+/g, '') === cleanPhone
+    );
     if (!targetUser) {
-      setError('اسم المستخدم غير مسجل في المنظومة. يرجى التأكد من اسم الحساب.');
+      setError('بيانات التحقق غير متطابقة. يرجى التأكد من اسم المستخدم (مطابق لحالة الأحرف) ورقم الهاتف المسجل.');
       return;
     }
 
@@ -108,16 +121,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
 
     setIsSubmitting(true);
     try {
-      // Update password in AppContext
       await changePassword(targetUser.id, forgotNewPass);
-      
-      // Auto login
+
       const loginRes = await login(targetUser.username, forgotNewPass);
       if (loginRes.success) {
         setForgotSuccess(true);
         setTimeout(() => {
           setIsForgotPass(false);
           setForgotSuccess(false);
+          setForgotPhone('');
           if (onClose) onClose();
         }, 1200);
       } else {
@@ -226,36 +238,35 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
                   <span>استرجاع أو تعيين كلمة سر جديدة</span>
                 </div>
                 <p className="text-[11px] text-amber-800 dark:text-stone-300 leading-relaxed">
-                  اختر اسم مستخدم حسابك ثم اكتب كلمة السر الجديدة التي ترغب في تعيينها مباشرة.
+                  أدخل اسم المستخدم بدقة (مطابق لحالة الأحرف) ورقم الهاتف المسجل بالحساب للتحقق وتعيين كلمة سر جديدة.
                 </p>
               </div>
 
               <div>
-                <label className="block font-bold mb-1 text-slate-800 dark:text-stone-200">اختر أو اكتب اسم المستخدم *</label>
+                <label className="block font-bold mb-1 text-slate-800 dark:text-stone-200">اسم المستخدم *</label>
                 <div className="relative">
-                  <select
-                    value={forgotUsername}
-                    onChange={(e) => setForgotUsername(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-[#250d18] border border-amber-300 dark:border-[#4d1d2c] rounded-xl pr-3 pl-9 py-2.5 text-xs font-bold text-slate-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-burgundy-600/30"
-                  >
-                    <option value="">-- اختر حسابك من القائمة --</option>
-                    {users.map(u => (
-                      <option key={u.id} value={u.username}>
-                        {u.name} (@{u.username}) - {u.assignedStage}
-                      </option>
-                    ))}
-                  </select>
-                  <User className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                </div>
-                <div className="mt-1.5">
                   <input
                     type="text"
+                    required
                     value={forgotUsername}
                     onChange={(e) => setForgotUsername(e.target.value)}
-                    placeholder="أو اكتب اسم المستخدم يدوياً (مثال: admin)"
-                    className="w-full bg-slate-50 dark:bg-[#250d18] border border-amber-300 dark:border-[#4d1d2c] rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-burgundy-600/30"
+                    placeholder="اكتب اسم المستخدم بدقة (مثال: mina.amin)"
+                    className="w-full bg-slate-50 dark:bg-[#250d18] border border-amber-300 dark:border-[#4d1d2c] rounded-xl pr-3 pl-9 py-2.5 text-xs font-semibold text-slate-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-burgundy-600/30"
                   />
+                  <User className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                 </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1 text-slate-800 dark:text-stone-200">رقم الهاتف المسجل للتحقق *</label>
+                <input
+                  type="tel"
+                  required
+                  value={forgotPhone}
+                  onChange={(e) => setForgotPhone(e.target.value)}
+                  placeholder="01xxxxxxxxx"
+                  className="w-full bg-slate-50 dark:bg-[#250d18] border border-amber-300 dark:border-[#4d1d2c] rounded-xl px-3 py-2.5 text-xs font-mono font-semibold text-slate-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-burgundy-600/30"
+                />
               </div>
 
               <div>

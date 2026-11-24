@@ -17,19 +17,18 @@ function sha256Fallback(ascii: string): string {
 
   const mathPow = Math.pow;
   const maxWord = mathPow(2, 32);
-  let lengthProperty = 'length';
   let i: number, j: number;
   let result = '';
 
   const words: number[] = [];
-  const asciiBitLength = ascii[lengthProperty] * 8;
+  const asciiBitLength = ascii.length * 8;
 
-  let hash = [
+  let hash: number[] = [
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
     0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
   ];
 
-  const k = [
+  const k: number[] = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
     0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
     0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
@@ -40,7 +39,7 @@ function sha256Fallback(ascii: string): string {
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
   ];
 
-  let isComposite: Record<number, boolean> = {};
+  const isComposite: Record<number, boolean> = {};
   for (let candidate = 2; hash.length < 8; candidate++) {
     if (!isComposite[candidate]) {
       for (i = 0; i < 313; i += candidate) {
@@ -51,16 +50,16 @@ function sha256Fallback(ascii: string): string {
   }
 
   ascii += '\x80';
-  while (ascii[lengthProperty] % 64 - 56) ascii += '\x00';
-  for (i = 0; i < ascii[lengthProperty]; i++) {
+  while ((ascii.length % 64) - 56) ascii += '\x00';
+  for (i = 0; i < ascii.length; i++) {
     j = ascii.charCodeAt(i);
     if (j >> 8) return '';
-    words[i >> 2] |= j << ((3 - i) % 4) * 8;
+    words[i >> 2] = (words[i >> 2] || 0) | (j << (((3 - i) % 4) * 8));
   }
-  words[words[lengthProperty]] = (asciiBitLength / maxWord) | 0;
-  words[words[lengthProperty]] = asciiBitLength;
+  words.push((asciiBitLength / maxWord) | 0);
+  words.push(asciiBitLength);
 
-  for (j = 0; j < words[lengthProperty];) {
+  for (j = 0; j < words.length;) {
     const w = words.slice(j, (j += 16));
     const oldHash = hash;
     hash = hash.slice(0, 8);

@@ -24,18 +24,13 @@ export const BookModal: React.FC<BookModalProps> = ({
 }) => {
   const { role, stagesList } = useApp();
 
-  if (!isOpen) return null;
-
-  const isViewMode = !!bookToView;
-  const isAminAm = role === 'amin_khedma_am';
-
   // All available stages for selection (including 'عامة')
   const availableStages: Stage[] = [
     'عامة',
     ...stagesList.map(s => s.name).filter(n => n !== 'عامة')
   ];
 
-  // File Inputs Refs
+  // File Inputs Refs (Hoisted before any conditional return)
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
 
@@ -84,6 +79,11 @@ export const BookModal: React.FC<BookModalProps> = ({
 
   // PDF Modal Embedded View State
   const [showPdfViewer, setShowPdfViewer] = useState(false);
+
+  if (!isOpen) return null;
+
+  const isViewMode = !!bookToView;
+  const isAminAm = role === 'amin_khedma_am';
 
   // Handle stage toggling
   const handleToggleStage = (stg: Stage) => {
@@ -202,10 +202,10 @@ export const BookModal: React.FC<BookModalProps> = ({
             </div>
             <div>
               <h3 className="text-base font-black text-amber-50">
-                {isViewMode ? bookToView.title : 'إضافة كتاب أو منهج PDF للمكتبة'}
+                {bookToView ? bookToView.title : 'إضافة كتاب أو منهج PDF للمكتبة'}
               </h3>
               <p className="text-[11px] text-churchgold-300">
-                {isViewMode ? 'عرض وتصفح تفاصيل الكتاب والمراحل المتاح لها' : 'حدد عنوان الكتاب، القسم، والمراحل التي يظهر لها (يمكن اختيار أكثر من مرحلة)'}
+                {bookToView ? 'عرض وتصفح تفاصيل الكتاب والمراحل المتاح لها' : 'حدد عنوان الكتاب، القسم، والمراحل التي يظهر لها (يمكن اختيار أكثر من مرحلة)'}
               </p>
             </div>
           </div>
@@ -215,7 +215,7 @@ export const BookModal: React.FC<BookModalProps> = ({
         </div>
 
         {/* View Mode */}
-        {isViewMode ? (
+        {bookToView ? (
           <div className="p-6 space-y-5 text-xs text-slate-700 dark:text-stone-300 max-h-[80vh] overflow-y-auto">
             
             {/* Book Cover Header Banner */}

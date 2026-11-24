@@ -1,18 +1,16 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
+import {registerSW} from 'virtual:pwa-register';
 import App from './App.tsx';
 import './index.css';
 
-// Register Service Worker for PWA compliance (Offline & Mobile Installability)
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').then((reg) => {
-      console.log('PWA Service Worker active:', reg.scope);
-    }).catch((err) => {
-      console.warn('PWA Service Worker registration failed:', err);
-    });
-  });
-}
+// Register Workbox Service Worker managed by vite-plugin-pwa
+registerSW({
+  immediate: true,
+  onRegisterError(error) {
+    console.warn('PWA Service Worker registration failed:', error);
+  },
+});
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
