@@ -14,7 +14,7 @@ import { getStageBadgeClass } from '../utils/themeColors';
 export const ServantsAttendanceTab: React.FC = () => {
   const { 
     servants, attendance, markAttendance, markAllAttendance, 
-    getAttendanceRecord, selectedStageScope, role, currentUser, 
+    getAttendanceRecord, selectedStageScope, activeStageName, role, currentUser, 
     stagesList, setActiveTab 
   } = useApp();
 
@@ -24,12 +24,18 @@ export const ServantsAttendanceTab: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<string>(() => {
     return new Date().toISOString().split('T')[0];
   });
-  const [selectedStage, setSelectedStage] = useState<string>(() => {
-    if (role === 'amin_khedma_am') return selectedStageScope;
+  const resolveNonAdminStage = () => {
+    if (activeStageName && activeStageName !== 'all' && activeStageName !== 'عامة' && activeStageName !== 'في انتظار التعيين') {
+      return activeStageName;
+    }
     if (currentUser?.assignedStage && currentUser.assignedStage !== 'عامة' && currentUser.assignedStage !== 'في انتظار التعيين') {
       return currentUser.assignedStage;
     }
     return 'all';
+  };
+  const [selectedStage, setSelectedStage] = useState<string>(() => {
+    if (role === 'amin_khedma_am') return selectedStageScope;
+    return resolveNonAdminStage();
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | AttendanceStatus | 'unrecorded'>('all');
@@ -39,12 +45,10 @@ export const ServantsAttendanceTab: React.FC = () => {
   React.useEffect(() => {
     if (role === 'amin_khedma_am') {
       setSelectedStage(selectedStageScope);
-    } else if (currentUser?.assignedStage && currentUser.assignedStage !== 'عامة' && currentUser.assignedStage !== 'في انتظار التعيين') {
-      setSelectedStage(currentUser.assignedStage);
     } else {
-      setSelectedStage('all');
+      setSelectedStage(resolveNonAdminStage());
     }
-  }, [selectedStageScope, role, currentUser]);
+  }, [selectedStageScope, activeStageName, role, currentUser]);
 
   // Extract recorded dates for servants
   const recordedDates: string[] = Array.from(
@@ -55,10 +59,17 @@ export const ServantsAttendanceTab: React.FC = () => {
     )
   ).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
 
-  const stageFilteredServants = servants.filter(s => {
+  const visibleServants = servants.filter(
+    s => s.is_directory_visible !== false && !s.roleTitle?.includes('أمين الخدمة العام')
+  );
+
+  const stageFilteredServants = visibleServants.filter(s => {
     if (selectedStage === 'all') return true;
-    return s.assignedStage === selectedStage || 
-      (s.assignedStages && s.assignedStages.includes(selectedStage));
+    return (
+      s.assignedStage === selectedStage ||
+      Boolean(s.assignedStages && s.assignedStages.includes(selectedStage)) ||
+      Boolean(s.assignments && s.assignments.some(a => a.stageName === selectedStage))
+    );
   });
 
   const searchedServants = stageFilteredServants.filter(s => {
@@ -111,7 +122,10 @@ export const ServantsAttendanceTab: React.FC = () => {
   };
 
   const handleBulkAction = (status: AttendanceStatus) => {
-    const ids = searchedServants.map(s => s.id);
+    const ids = searchedServants
+      .filter(s => s.id !== currentUser?.id)
+      .map(s => s.id);
+    if (ids.length === 0) return;
     markAllAttendance('servant', selectedEventType, selectedDate, ids, status);
   };
 
@@ -409,18 +423,24 @@ export const ServantsAttendanceTab: React.FC = () => {
           <div className="flex items-center gap-2">
             <Filter className="w-4 h-4 text-churchgold-600 dark:text-churchgold-400" />
             <span className="text-xs font-bold text-slate-700 dark:text-stone-300">المرحلة الخدمية:</span>
-            <select
-              value={selectedStage}
-              onChange={(e) => setSelectedStage(e.target.value)}
-              className="bg-stone-50 dark:bg-[#240b17] border border-amber-200/80 dark:border-[#4d1d2c] rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 dark:text-stone-200 focus:outline-none focus:ring-2 focus:ring-burgundy-600/30 cursor-pointer"
-            >
-              <option value="all">🌐 كافة المراحل الخدمية والخدام ({servants.length} خادم)</option>
-              {stagesList.map(st => (
-                <option key={st.id || st.name} value={st.name}>
-                  {st.name} {currentUser?.assignedStage === st.name ? '⭐ (مرحلتك)' : ''}
-                </option>
-              ))}
-            </select>
+            {role === 'amin_khedma_am' ? (
+              <select
+                value={selectedStage}
+                onChange={(e) => setSelectedStage(e.target.value)}
+                className="bg-stone-50 dark:bg-[#240b17] border border-amber-200/80 dark:border-[#4d1d2c] rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 dark:text-stone-200 focus:outline-none focus:ring-2 focus:ring-burgundy-600/30 cursor-pointer"
+              >
+                <option value="all">🌐 كافة المراحل الخدمية والخدام ({visibleServants.length} خادم)</option>
+                {stagesList.map(st => (
+                  <option key={st.id || st.name} value={st.name}>
+                    {st.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="bg-burgundy-50 dark:bg-[#240b17] border border-burgundy-200/80 dark:border-[#4d1d2c] rounded-xl px-3 py-1.5 text-xs font-bold text-burgundy-900 dark:text-churchgold-300">
+                {selectedStage === 'all' ? 'عامة' : selectedStage}
+              </div>
+            )}
 
             <span className="text-xs text-slate-500 dark:text-stone-400 font-bold mr-2">
               (مطابق: {searchedServants.length} خادم)
@@ -641,6 +661,7 @@ export const ServantsAttendanceTab: React.FC = () => {
             displayedServants.map(servant => {
               const currentStatus = recordsMap[servant.id]?.status;
               const currentNote = noteInputs[servant.id] ?? (recordsMap[servant.id]?.note || '');
+              const isSelfRow = Boolean(currentUser?.id && servant.id === currentUser.id);
 
               return (
                 <div 
@@ -665,6 +686,11 @@ export const ServantsAttendanceTab: React.FC = () => {
                         <span className={`px-2.5 py-0.5 rounded-lg border text-xs font-black shrink-0 ${getStageBadgeClass(servant.assignedStage)}`}>
                           {servant.assignedStage}
                         </span>
+                        {isSelfRow && (
+                          <span className="px-2 py-0.5 rounded-lg bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700 text-[10px] font-black">
+                            حسابك (التحضير الذاتي غير مسموح)
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-slate-700 dark:text-stone-300 font-bold mt-0.5">
                         {servant.roleTitle || 'خادم'} • تليفون: {servant.phone || 'بدون تليفون'}
@@ -675,11 +701,14 @@ export const ServantsAttendanceTab: React.FC = () => {
                   {/* Attendance Controls & Note */}
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
                     {/* Status Toggle Buttons */}
-                    <div className="grid grid-cols-4 gap-1.5 bg-stone-100 dark:bg-[#250d18] p-1 rounded-xl border border-amber-300/80 dark:border-[#4d1d2c]">
+                    <div className={`grid grid-cols-4 gap-1.5 bg-stone-100 dark:bg-[#250d18] p-1 rounded-xl border border-amber-300/80 dark:border-[#4d1d2c] ${isSelfRow ? 'opacity-50 pointer-events-none' : ''}`}>
                       <button
                         type="button"
+                        disabled={isSelfRow}
                         onClick={() => handleStatusChange(servant.id, 'present')}
-                        className={`py-2 px-3 sm:px-4 rounded-lg text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                        className={`py-2 px-3 sm:px-4 rounded-lg text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-1.5 ${
+                          isSelfRow ? 'cursor-not-allowed' : 'cursor-pointer'
+                        } ${
                           currentStatus === 'present'
                             ? 'bg-emerald-600 text-white shadow-xs'
                             : 'text-slate-800 dark:text-stone-300 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
@@ -691,8 +720,11 @@ export const ServantsAttendanceTab: React.FC = () => {
 
                       <button
                         type="button"
+                        disabled={isSelfRow}
                         onClick={() => handleStatusChange(servant.id, 'late')}
-                        className={`py-2 px-3 sm:px-4 rounded-lg text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                        className={`py-2 px-3 sm:px-4 rounded-lg text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-1.5 ${
+                          isSelfRow ? 'cursor-not-allowed' : 'cursor-pointer'
+                        } ${
                           currentStatus === 'late'
                             ? 'bg-amber-600 text-white shadow-xs'
                             : 'text-slate-800 dark:text-stone-300 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40'
@@ -704,8 +736,11 @@ export const ServantsAttendanceTab: React.FC = () => {
 
                       <button
                         type="button"
+                        disabled={isSelfRow}
                         onClick={() => handleStatusChange(servant.id, 'excused')}
-                        className={`py-2 px-3 sm:px-4 rounded-lg text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                        className={`py-2 px-3 sm:px-4 rounded-lg text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-1.5 ${
+                          isSelfRow ? 'cursor-not-allowed' : 'cursor-pointer'
+                        } ${
                           currentStatus === 'excused'
                             ? 'bg-blue-600 text-white shadow-xs'
                             : 'text-slate-800 dark:text-stone-300 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/40'
@@ -717,8 +752,11 @@ export const ServantsAttendanceTab: React.FC = () => {
 
                       <button
                         type="button"
+                        disabled={isSelfRow}
                         onClick={() => handleStatusChange(servant.id, 'absent')}
-                        className={`py-2 px-3 sm:px-4 rounded-lg text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                        className={`py-2 px-3 sm:px-4 rounded-lg text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-1.5 ${
+                          isSelfRow ? 'cursor-not-allowed' : 'cursor-pointer'
+                        } ${
                           currentStatus === 'absent'
                             ? 'bg-rose-600 text-white shadow-xs'
                             : 'text-slate-800 dark:text-stone-300 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40'
@@ -733,10 +771,11 @@ export const ServantsAttendanceTab: React.FC = () => {
                     <div className="w-full sm:w-52">
                       <input
                         type="text"
+                        disabled={isSelfRow}
                         value={currentNote}
                         onChange={(e) => handleNoteChange(servant.id, e.target.value)}
-                        placeholder="اكتب ملاحظة أو سبب الغياب..."
-                        className="w-full bg-stone-50 dark:bg-[#200b14] border border-amber-300/80 dark:border-[#4d1d2c] rounded-xl px-3 py-2 text-xs sm:text-sm font-bold text-slate-950 dark:text-stone-100 placeholder:text-stone-400 focus:bg-white dark:focus:bg-[#2c0e1c] focus:outline-none focus:ring-2 focus:ring-burgundy-600/30"
+                        placeholder={isSelfRow ? 'التحضير الذاتي معطل' : 'اكتب ملاحظة أو سبب الغياب...'}
+                        className="w-full bg-stone-50 dark:bg-[#200b14] border border-amber-300/80 dark:border-[#4d1d2c] rounded-xl px-3 py-2 text-xs sm:text-sm font-bold text-slate-950 dark:text-stone-100 placeholder:text-stone-400 focus:bg-white dark:focus:bg-[#2c0e1c] focus:outline-none focus:ring-2 focus:ring-burgundy-600/30 disabled:opacity-50 disabled:cursor-not-allowed"
                       />
                     </div>
                   </div>

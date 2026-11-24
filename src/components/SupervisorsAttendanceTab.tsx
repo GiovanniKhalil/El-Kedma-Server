@@ -11,7 +11,7 @@ import {
 import { getStageBadgeClass } from '../utils/themeColors';
 
 export const SupervisorsAttendanceTab: React.FC = () => {
-  const { supervisors, markAttendance, markAllAttendance, getAttendanceRecord, stagesList, setActiveTab } = useApp();
+  const { supervisors, currentUser, markAttendance, markAllAttendance, getAttendanceRecord, stagesList, setActiveTab } = useApp();
 
   const [isAddingNewDay, setIsAddingNewDay] = useState(false);
   const [customNewDate, setCustomNewDate] = useState('');
@@ -27,12 +27,16 @@ export const SupervisorsAttendanceTab: React.FC = () => {
   const [noteInputs, setNoteInputs] = useState<Record<string, string>>({});
   const [showAdvancedTools, setShowAdvancedTools] = useState(false);
 
+  const visibleSupervisors = supervisors.filter(
+    s => s.is_directory_visible !== false && !s.title?.includes('أمين الخدمة العام')
+  );
+
   // Separate lists
-  const headSupervisors = supervisors.filter(s => !s.isAssistant && s.roleType !== 'assistant_supervisor');
-  const assistantSupervisors = supervisors.filter(s => s.isAssistant || s.roleType === 'assistant_supervisor');
+  const headSupervisors = visibleSupervisors.filter(s => !s.isAssistant && s.roleType !== 'assistant_supervisor');
+  const assistantSupervisors = visibleSupervisors.filter(s => s.isAssistant || s.roleType === 'assistant_supervisor');
 
   // Filter based on active role tab, stage, and search query
-  const displayedSupervisors = supervisors.filter(s => {
+  const displayedSupervisors = visibleSupervisors.filter(s => {
     const isAssistant = !!(s.isAssistant || s.roleType === 'assistant_supervisor');
 
     // Role separation filter
@@ -99,7 +103,10 @@ export const SupervisorsAttendanceTab: React.FC = () => {
   };
 
   const handleBulkAction = (status: AttendanceStatus) => {
-    const ids = finalList.map(s => s.id);
+    const ids = finalList
+      .filter(s => s.id !== currentUser?.id)
+      .map(s => s.id);
+    if (ids.length === 0) return;
     markAllAttendance('supervisor', selectedEventType, selectedDate, ids, status);
   };
 
@@ -382,7 +389,7 @@ export const SupervisorsAttendanceTab: React.FC = () => {
               }`}
             >
               <span>الكل معاً</span>
-              <span className="text-[10px] opacity-75">({supervisors.length})</span>
+              <span className="text-[10px] opacity-75">({visibleSupervisors.length})</span>
             </button>
           </div>
 
@@ -615,6 +622,7 @@ export const SupervisorsAttendanceTab: React.FC = () => {
               const currentStatus = record?.status;
               const currentNote = noteInputs[sup.id] !== undefined ? noteInputs[sup.id] : (record?.note || '');
               const isAssistant = !!(sup.isAssistant || sup.roleType === 'assistant_supervisor');
+              const isSelfRow = Boolean(currentUser?.id && sup.id === currentUser.id);
 
               return (
                 <div 
@@ -658,6 +666,12 @@ export const SupervisorsAttendanceTab: React.FC = () => {
                         <span className={`px-2.5 py-0.5 rounded-lg text-xs font-black border ${getStageBadgeClass(sup.assignedStage || sup.supervisedStage || '')} shrink-0`}>
                           {sup.assignedStage || sup.supervisedStage || 'عامة'}
                         </span>
+
+                        {isSelfRow && (
+                          <span className="px-2 py-0.5 rounded-lg bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700 text-[10px] font-black">
+                            حسابك (التحضير الذاتي غير مسموح)
+                          </span>
+                        )}
                       </div>
 
                       <div className="text-xs text-slate-700 dark:text-stone-300 mt-1 flex flex-wrap items-center gap-3 font-bold">
@@ -670,10 +684,13 @@ export const SupervisorsAttendanceTab: React.FC = () => {
                   <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 self-stretch md:self-auto shrink-0">
                     
                     {/* Status Toggle Buttons */}
-                    <div className="grid grid-cols-4 gap-1.5 bg-stone-100 dark:bg-[#250d18] p-1 rounded-xl border border-amber-300/80 dark:border-[#4d1d2c]">
+                    <div className={`grid grid-cols-4 gap-1.5 bg-stone-100 dark:bg-[#250d18] p-1 rounded-xl border border-amber-300/80 dark:border-[#4d1d2c] ${isSelfRow ? 'opacity-50 pointer-events-none' : ''}`}>
                       <button
+                        disabled={isSelfRow}
                         onClick={() => handleStatusChange(sup.id, 'present')}
-                        className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                        className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-black transition-all ${
+                          isSelfRow ? 'cursor-not-allowed' : 'cursor-pointer'
+                        } ${
                           currentStatus === 'present'
                             ? 'bg-emerald-600 text-white shadow-xs'
                             : 'text-stone-700 dark:text-stone-300 hover:text-emerald-700'
@@ -685,8 +702,11 @@ export const SupervisorsAttendanceTab: React.FC = () => {
                       </button>
 
                       <button
+                        disabled={isSelfRow}
                         onClick={() => handleStatusChange(sup.id, 'late')}
-                        className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                        className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-black transition-all ${
+                          isSelfRow ? 'cursor-not-allowed' : 'cursor-pointer'
+                        } ${
                           currentStatus === 'late'
                             ? 'bg-amber-600 text-white shadow-xs'
                             : 'text-stone-700 dark:text-stone-300 hover:text-amber-700'
@@ -698,8 +718,11 @@ export const SupervisorsAttendanceTab: React.FC = () => {
                       </button>
 
                       <button
+                        disabled={isSelfRow}
                         onClick={() => handleStatusChange(sup.id, 'excused')}
-                        className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                        className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-black transition-all ${
+                          isSelfRow ? 'cursor-not-allowed' : 'cursor-pointer'
+                        } ${
                           currentStatus === 'excused'
                             ? 'bg-blue-600 text-white shadow-xs'
                             : 'text-stone-700 dark:text-stone-300 hover:text-blue-700'
@@ -711,8 +734,11 @@ export const SupervisorsAttendanceTab: React.FC = () => {
                       </button>
 
                       <button
+                        disabled={isSelfRow}
                         onClick={() => handleStatusChange(sup.id, 'absent')}
-                        className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                        className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-black transition-all ${
+                          isSelfRow ? 'cursor-not-allowed' : 'cursor-pointer'
+                        } ${
                           currentStatus === 'absent'
                             ? 'bg-rose-600 text-white shadow-xs'
                             : 'text-stone-700 dark:text-stone-300 hover:text-rose-700'
@@ -727,10 +753,11 @@ export const SupervisorsAttendanceTab: React.FC = () => {
                     {/* Note Input */}
                     <input
                       type="text"
+                      disabled={isSelfRow}
                       value={currentNote}
                       onChange={(e) => handleNoteChange(sup.id, e.target.value)}
-                      placeholder="ملاحظات..."
-                      className="w-full sm:w-44 bg-stone-50 dark:bg-[#240b17] border border-amber-200/80 dark:border-[#4d1d2c] rounded-xl px-3 py-1.5 text-xs sm:text-sm font-semibold text-slate-900 dark:text-stone-100 placeholder-stone-400 focus:bg-white dark:focus:bg-[#2c0e1c] focus:outline-none"
+                      placeholder={isSelfRow ? 'التحضير الذاتي معطل' : 'ملاحظات...'}
+                      className="w-full sm:w-44 bg-stone-50 dark:bg-[#240b17] border border-amber-200/80 dark:border-[#4d1d2c] rounded-xl px-3 py-1.5 text-xs sm:text-sm font-semibold text-slate-900 dark:text-stone-100 placeholder-stone-400 focus:bg-white dark:focus:bg-[#2c0e1c] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                     />
 
                   </div>

@@ -1,19 +1,19 @@
-import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  updatePassword, 
-  signOut, 
-  onAuthStateChanged,
+import { initializeApp, getApps } from 'firebase/app';
+import {
+  getAuth,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signInAnonymously,
+  updatePassword,
+  signOut,
   User as FirebaseUser
 } from 'firebase/auth';
-import { 
-  initializeFirestore, 
-  doc, 
-  getDocFromServer, 
-  setDoc, 
-  deleteDoc 
+import {
+  initializeFirestore,
+  doc,
+  getDocFromServer,
+  setDoc,
+  deleteDoc
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -33,23 +33,23 @@ export const db = initializeFirestore(
 export const auth = getAuth(app);
 
 // Helper to formulate a guaranteed valid ASCII email for Firebase Authentication
-export function formatSafeChurchEmail(input: string): string {
+export function formatSafeChurchEmail(input: string, domain = 'stjohn.church'): string {
   const clean = input.trim().toLowerCase()
-    .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString()); // Convert Arabic digits
-  
+    .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
+
   if (clean.includes('@') && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
     return clean;
   }
-  
+
   const asciiSafe = clean.replace(/[^a-z0-9_.]/g, '');
   if (asciiSafe.length >= 3) {
-    return `${asciiSafe}@church.org`;
+    return `${asciiSafe}@${domain}`;
   }
-  
+
   // Safe hex encoding for Arabic or unicode usernames
   const bytes = new TextEncoder().encode(clean);
   const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 24);
-  return `user_${hex || 'servant'}@church.org`;
+  return `user_${hex || 'servant'}@${domain}`;
 }
 
 // Helper to ensure password satisfies Firebase Auth 6-char minimum
@@ -59,32 +59,41 @@ export function formatSafeFirebasePass(rawPass: string): string {
   return `${clean}_church`;
 }
 
-// Helper for Email & Password Sign In with auto-provisioning
+// Email & Password Sign In with legacy domain fallback and auto-provisioning
 export async function loginWithFirebaseAuth(emailOrUsername: string, pass: string): Promise<FirebaseUser> {
-  const email = formatSafeChurchEmail(emailOrUsername);
+  const email = formatSafeChurchEmail(emailOrUsername, 'stjohn.church');
+  const legacyEmail = formatSafeChurchEmail(emailOrUsername, 'church.org');
   const securePass = formatSafeFirebasePass(pass);
 
   try {
     const cred = await signInWithEmailAndPassword(auth, email, securePass);
     return cred.user;
   } catch (err: any) {
-    // If account doesn't exist in Firebase Auth yet, auto-provision it with provided password
     if (
-      err.code === 'auth/user-not-found' || 
-      err.code === 'auth/invalid-credential' || 
+      err.code === 'auth/user-not-found' ||
+      err.code === 'auth/invalid-credential' ||
       err.code === 'auth/invalid-login-credentials'
     ) {
+      // Try legacy @church.org auth account if present
+      if (legacyEmail !== email) {
+        try {
+          const legacyCred = await signInWithEmailAndPassword(auth, legacyEmail, securePass);
+          return legacyCred.user;
+        } catch {
+          // Proceed to provisioning @stjohn.church
+        }
+      }
+
       try {
         const newCred = await createUserWithEmailAndPassword(auth, email, securePass);
         return newCred.user;
       } catch (createErr: any) {
-        // If already in use, password might be different, but user exists
         if (createErr.code === 'auth/email-already-in-use') {
           try {
             const retryCred = await signInWithEmailAndPassword(auth, email, securePass);
             return retryCred.user;
           } catch {
-            // Handled by higher layer
+            // Handled below
           }
         }
         throw new Error('اسم المستخدم أو كلمة السر غير صحيحة');
@@ -95,6 +104,52 @@ export async function loginWithFirebaseAuth(emailOrUsername: string, pass: strin
       throw new Error(err.message || 'فشل تسجيل الدخول');
     }
   }
+}
+
+/**
+ * Creates/provisions a Firebase Auth account using a secondary app instance ('Provisioner')
+ * so Amin El-Khedma El-Am does NOT lose their active admin session when approving or adding accounts.
+ */
+export async function provisionFirebaseAuthUser(
+  emailOrUsername: string,
+  pass: string
+): Promise<string | null> {
+  const email = formatSafeChurchEmail(emailOrUsername, 'stjohn.church');
+  const securePass = formatSafeFirebasePass(pass);
+  try {
+    const existingApp = getApps().find((a) => a.name === 'Provisioner');
+    const provApp = existingApp || initializeApp(firebaseConfig, 'Provisioner');
+    const provAuth = getAuth(provApp);
+
+    try {
+      const cred = await createUserWithEmailAndPassword(provAuth, email, securePass);
+      const uid = cred.user.uid;
+      await signOut(provAuth);
+      return uid;
+    } catch (err: any) {
+      if (err?.code === 'auth/email-already-in-use') {
+        try {
+          const signInCred = await signInWithEmailAndPassword(provAuth, email, securePass);
+          const uid = signInCred.user.uid;
+          await signOut(provAuth);
+          return uid;
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Uses anonymous Firebase Auth strictly for submitting isolated signup requests to /pending_registrations.
+ */
+export async function signInAnonymouslyForPendingRegistration(): Promise<FirebaseUser> {
+  const cred = await signInAnonymously(auth);
+  return cred.user;
 }
 
 // Helper to update current authenticated user's password
@@ -109,6 +164,37 @@ export async function updateFirebaseUserPassword(newPass: string): Promise<void>
 // Helper for Sign Out
 export async function logoutFirebaseAuth(): Promise<void> {
   await signOut(auth);
+}
+
+/**
+ * Strips immutable audit/ownership fields (createdAt, ownerUid), undefined values,
+ * plaintext passwords, and masked placeholder hashes ('••••••••', '***') from Firestore update payloads.
+ */
+export function sanitizeFirestoreUpdatePayload<T extends Record<string, any>>(
+  data: T,
+  options: { allowPasswordHash?: boolean } = {}
+): Record<string, any> {
+  const { allowPasswordHash = false } = options;
+  const sanitized: Record<string, any> = {};
+  const maskedValues = new Set(['••••••••', '********', '****', '***', '******', '']);
+
+  for (const [key, value] of Object.entries(data)) {
+    if (value === undefined) continue;
+    if (key === 'createdAt' || key === 'ownerUid') continue;
+    if (key === 'password') continue;
+    if (key === 'passwordHash') {
+      if (!allowPasswordHash) continue;
+      if (
+        typeof value !== 'string' ||
+        maskedValues.has(value.trim()) ||
+        /^[•*]+$/.test(value.trim())
+      ) {
+        continue;
+      }
+    }
+    sanitized[key] = value;
+  }
+  return sanitized;
 }
 
 // Operation types for logging and error reporting
@@ -165,7 +251,7 @@ export async function testFirestoreConnection(): Promise<boolean> {
     return true;
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn("Please check your Firebase configuration or internet connection.");
+      console.warn('Please check your Firebase configuration or internet connection.');
       return false;
     }
     return true;
@@ -174,8 +260,7 @@ export async function testFirestoreConnection(): Promise<boolean> {
 
 /**
  * Update or create user/profile data in Firestore using setDoc with { merge: true }.
- * Ensures that if the user document does not exist yet, it is created rather than
- * failing with "No document to update" error.
+ * Sanitizes immutable fields and prevents masked passwords from overwriting real hashes.
  */
 export async function setFirestoreUserWithMerge(
   userId: string,
@@ -185,10 +270,13 @@ export async function setFirestoreUserWithMerge(
   const path = `users/${cleanId}`;
   try {
     const docRef = doc(db, 'users', cleanId);
+    const sanitized = sanitizeFirestoreUpdatePayload(data, {
+      allowPasswordHash: typeof data.passwordHash === 'string' && data.passwordHash.length >= 16,
+    });
     await setDoc(
       docRef,
       {
-        ...data,
+        ...sanitized,
         updatedAt: new Date().toISOString()
       },
       { merge: true }
@@ -213,4 +301,5 @@ export async function deleteFirestoreUser(userId: string): Promise<void> {
     throw error;
   }
 }
+
 

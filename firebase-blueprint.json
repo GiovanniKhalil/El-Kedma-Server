@@ -64,7 +64,13 @@
         "parent2Name": { "type": "string", "description": "Secondary guardian name", "maxLength": 120 },
         "parent2Phone": { "type": "string", "description": "Secondary guardian phone", "maxLength": 24 },
         "parent2Relation": { "type": "string", "description": "Secondary guardian relation", "maxLength": 40 },
-        "parent2Job": { "type": "string", "description": "Secondary guardian job", "maxLength": 100 }
+        "parent2Job": { "type": "string", "description": "Secondary guardian job", "maxLength": 100 },
+        "age": { "type": "number", "description": "Calculated age" },
+        "gender": { "type": "string", "description": "boy or girl", "maxLength": 10 },
+        "area": { "type": "string", "description": "Residential area", "maxLength": 120 },
+        "address": { "type": "string", "description": "Detailed address", "maxLength": 300 },
+        "notes": { "type": "string", "description": "Follow-up notes", "maxLength": 500 },
+        "createdAt": { "type": "string", "description": "Record creation timestamp", "maxLength": 40 }
       },
       "required": ["fullName", "stage"]
     },
@@ -95,7 +101,17 @@
         "visibility": { "type": "string", "description": "Visibility scope", "enum": ["all", "specific_stages"] },
         "targetGrade": { "type": "string", "description": "Primary target educational grade or stage", "maxLength": 100 },
         "targetStages": { "type": "array", "description": "List of target stage names" },
-        "fileUrl": { "type": "string", "description": "URL or path of the PDF document", "maxLength": 2000 }
+        "fileUrl": { "type": "string", "description": "URL or bounded Data URL of the PDF document", "maxLength": 980000 },
+        "pdfUrl": { "type": "string", "description": "PDF URL or bounded Data URL", "maxLength": 980000 },
+        "pdfFileName": { "type": "string", "description": "Uploaded PDF filename", "maxLength": 200 },
+        "pdfFileSize": { "type": "string", "description": "Readable PDF size", "maxLength": 40 },
+        "coverImage": { "type": "string", "description": "Compressed cover image", "maxLength": 250000 },
+        "coverBg": { "type": "string", "description": "Gradient CSS class", "maxLength": 100 },
+        "author": { "type": "string", "description": "Author name", "maxLength": 120 },
+        "year": { "type": "string", "description": "Publication year", "maxLength": 20 },
+        "description": { "type": "string", "description": "Book summary", "maxLength": 1500 },
+        "contentSummary": { "type": "string", "description": "Readable text excerpt", "maxLength": 4000 },
+        "pageCount": { "type": "number", "description": "Estimated page count" }
       },
       "required": ["title", "category", "targetGrade"]
     },
@@ -109,6 +125,10 @@
         "targetRole": { "type": "string", "description": "Target audience role or all", "maxLength": 100 },
         "targetScope": { "type": "string", "description": "Target scope", "enum": ["all", "general_dock", "specific_stages"] },
         "targetStages": { "type": "array", "description": "Target stage names when specific_stages" },
+        "date": { "type": "string", "description": "Announcement date YYYY-MM-DD", "maxLength": 20 },
+        "time": { "type": "string", "description": "Event time", "maxLength": 40 },
+        "type": { "type": "string", "description": "event, alert, spiritual, or meeting", "maxLength": 30 },
+        "createdBy": { "type": "string", "description": "Author display name", "maxLength": 120 },
         "createdAt": { "type": "string", "description": "Creation timestamp", "maxLength": 40 }
       },
       "required": ["title", "body"]
@@ -123,7 +143,14 @@
         "description": { "type": "string", "description": "Stage description", "maxLength": 400 },
         "supervisorName": { "type": "string", "description": "Stage supervisor name", "maxLength": 120 },
         "supervisorPhone": { "type": "string", "description": "Stage supervisor phone", "maxLength": 24 },
-        "meetingTime": { "type": "string", "description": "Weekly meeting time", "maxLength": 100 }
+        "assistantSupervisors": { "type": "array", "description": "Assistant stage leaders" },
+        "captainName": { "type": "string", "description": "Legacy supervisor alias", "maxLength": 120 },
+        "captainPhone": { "type": "string", "description": "Legacy supervisor phone alias", "maxLength": 24 },
+        "firstMateName": { "type": "string", "description": "Legacy assistant alias", "maxLength": 120 },
+        "firstMatePhone": { "type": "string", "description": "Legacy assistant phone alias", "maxLength": 24 },
+        "meetingTime": { "type": "string", "description": "Weekly meeting time", "maxLength": 100 },
+        "isCustom": { "type": "boolean", "description": "Custom created stage flag" },
+        "updatedAt": { "type": "string", "description": "Last update timestamp", "maxLength": 40 }
       },
       "required": ["id", "name"]
     },

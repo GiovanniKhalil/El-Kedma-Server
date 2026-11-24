@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { Stage, ChurchEventNotification } from '../types';
-import { STAGES, MONTHS } from '../data/mockData';
+import { Stage } from '../types';
+import { MONTHS } from '../data/mockData';
 import { 
-  Bell, Calendar, Users, BookOpen, UserCheck, Cake, Sparkles, Plus, Trash2, 
-  ChevronLeft, ShieldCheck, Phone, MessageCircle, AlertCircle, Clock, Gift,
-  Flame, MapPin, Layers, Cross, ArrowUpRight, X
+  Bell, Calendar, Users, Cake, Sparkles, Plus, Trash2, 
+  ChevronLeft, ShieldCheck, Phone, MessageCircle, Clock, Gift,
+  Layers, ArrowUpRight, X
 } from 'lucide-react';
 
 import { parseBirthDate } from './BirthdayWidget';
@@ -15,12 +15,19 @@ export const HomeTab: React.FC<{
   onOpenBirthdays?: () => void;
   onOpenUserManagement?: () => void;
   onOpenProfile?: () => void;
-}> = ({ onOpenAddChild, onOpenBirthdays, onOpenUserManagement, onOpenProfile }) => {
+}> = ({ onOpenBirthdays, onOpenUserManagement, onOpenProfile }) => {
   const { 
     currentUser, role, selectedStageScope, setSelectedStageScope, 
-    children, servants, books, attendance, notifications, 
+    activeStageName, children, servants, books, attendance, notifications, 
     addNotification, deleteNotification, setActiveTab, stagesList
   } = useApp();
+
+  const currentStage: string =
+    role === 'amin_khedma_am'
+      ? selectedStageScope
+      : activeStageName !== 'all'
+        ? activeStageName
+        : (currentUser?.assignedStage || selectedStageScope);
 
   // State for Add Notification Modal
   const [isAddNotifOpen, setIsAddNotifOpen] = useState(false);
@@ -29,27 +36,55 @@ export const HomeTab: React.FC<{
     description: '',
     date: new Date().toISOString().split('T')[0],
     time: '06:00 مساءً',
-    targetStage: (selectedStageScope === 'all' ? 'عامة' : selectedStageScope) as Stage,
+    targetStage: (currentStage === 'all' ? 'عامة' : currentStage) as Stage,
     type: 'event' as 'event' | 'alert' | 'spiritual' | 'meeting'
   });
 
-  // Filtered children and servants by selected stage scope
-  const filteredChildren = selectedStageScope === 'all' 
-    ? children 
-    : children.filter(c => c.stage === selectedStageScope);
+  useEffect(() => {
+    setNotifForm(prev => ({
+      ...prev,
+      targetStage: (currentStage === 'all' ? 'عامة' : currentStage) as Stage
+    }));
+  }, [currentStage, isAddNotifOpen]);
 
-  const filteredServants = selectedStageScope === 'all' 
-    ? servants 
-    : servants.filter(s => s.assignedStage === selectedStageScope);
+  // Filtered children and servants by current active stage scope
+  const filteredChildren = currentStage === 'all'
+    ? children
+    : children.filter(c => c.stage === currentStage || c.secondaryStages?.includes(currentStage));
 
-  const filteredBooks = selectedStageScope === 'all' 
-    ? books 
-    : books.filter(b => b.targetStage === selectedStageScope || b.targetStage === 'عامة');
+  const visibleServants = servants.filter(
+    s => s.is_directory_visible !== false && s.roleTitle !== 'أمين الخدمة العام'
+  );
 
-  // Filtered Notifications based on selected stage scope or 'عامة'
+  const filteredServants = currentStage === 'all'
+    ? visibleServants
+    : visibleServants.filter(
+        s =>
+          s.assignedStage === currentStage ||
+          s.assignedStages?.includes(currentStage) ||
+          s.assignments?.some(a => a.stageName === currentStage)
+      );
+
+  const filteredBooks = currentStage === 'all'
+    ? books
+    : books.filter(
+        b =>
+          b.visibility === 'all' ||
+          b.targetStages?.includes(currentStage) ||
+          b.targetStages?.includes('عامة') ||
+          b.targetStage === currentStage ||
+          b.targetStage === 'عامة'
+      );
+
+  // Filtered Notifications based on active stage scope or 'عامة'
   const filteredNotifications = notifications.filter(n => {
-    if (selectedStageScope === 'all') return true;
-    return n.targetStage === 'عامة' || n.targetStage === selectedStageScope;
+    if (currentStage === 'all') return true;
+    return (
+      n.targetScope === 'all' ||
+      n.targetStage === 'عامة' ||
+      n.targetStage === currentStage ||
+      n.targetStages?.includes(currentStage)
+    );
   });
 
   // Birthday logic for current month and today
@@ -63,7 +98,7 @@ export const HomeTab: React.FC<{
     return month === currentMonthNum;
   });
 
-  const birthdayServants = servants.filter(s => {
+  const birthdayServants = filteredServants.filter(s => {
     const { month } = parseBirthDate(s.birthDate, s.birthMonth);
     return month === currentMonthNum;
   });
@@ -97,12 +132,19 @@ export const HomeTab: React.FC<{
     e.preventDefault();
     if (!notifForm.title.trim() || !notifForm.description.trim()) return;
 
+    const finalTargetStage: Stage =
+      role === 'amin_khedma_am'
+        ? notifForm.targetStage
+        : ((currentStage === 'all' ? 'عامة' : currentStage) as Stage);
+
     addNotification({
       title: notifForm.title,
       description: notifForm.description,
       date: notifForm.date,
       time: notifForm.time,
-      targetStage: notifForm.targetStage,
+      targetStage: finalTargetStage,
+      targetScope: finalTargetStage === 'عامة' ? 'all' : 'specific_stages',
+      targetStages: finalTargetStage === 'عامة' ? [] : [finalTargetStage],
       type: notifForm.type,
       createdBy: currentUser?.name || 'أمين الخدمة'
     });
@@ -112,7 +154,7 @@ export const HomeTab: React.FC<{
       description: '',
       date: new Date().toISOString().split('T')[0],
       time: '06:00 مساءً',
-      targetStage: (selectedStageScope === 'all' ? 'عامة' : selectedStageScope) as Stage,
+      targetStage: (currentStage === 'all' ? 'عامة' : currentStage) as Stage,
       type: 'event'
     });
 
@@ -137,7 +179,17 @@ export const HomeTab: React.FC<{
                 مرحباً بك، {currentUser?.name || 'أ/ الخادم'} 👋
               </h1>
               <span className="px-2.5 py-0.5 rounded-full bg-churchgold-500/20 border border-churchgold-400/30 text-churchgold-700 dark:text-churchgold-300 text-[11px] font-black">
-                {role === 'amin_khedma_am' ? 'أمين الخدمة العام' : role === 'amin_fasl' ? 'أمين مرحلة وفصل' : 'خادم بالمرحلة'}
+                {currentUser?.role === 'amin_khedma_am'
+                  ? 'أمين الخدمة العام'
+                  : currentUser?.isAdminAssistant
+                    ? 'مساعد إداري للخدمة'
+                    : role === 'amin_fasl'
+                      ? 'أمين مرحلة وفصل'
+                      : role === 'mosaed_amin'
+                        ? 'مساعد أمين مرحلة'
+                        : role === 'general_dock'
+                          ? 'خادم عام'
+                          : 'خادم بالمرحلة'}
               </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-stone-400 mt-0.5">
@@ -179,7 +231,7 @@ export const HomeTab: React.FC<{
               </select>
             ) : (
               <div className="bg-white dark:bg-[#1a0a12] border border-amber-200/80 dark:border-[#4d1d2c] text-burgundy-900 dark:text-churchgold-300 rounded-lg px-2 py-1 text-xs font-bold shadow-2xs">
-                <span>{currentUser?.assignedStage || selectedStageScope}</span>
+                <span>{currentStage === 'all' ? 'عامة' : currentStage}</span>
               </div>
             )}
           </div>
@@ -195,12 +247,12 @@ export const HomeTab: React.FC<{
             <div>
               <h3 className="font-black text-slate-900 dark:text-stone-100 text-sm flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-churchgold-500" />
-                <span>إحصائيات {selectedStageScope === 'all' ? 'كافة مراحل وخدمات الكنيسة' : selectedStageScope}</span>
+                <span>إحصائيات {currentStage === 'all' ? 'كافة مراحل وخدمات الكنيسة' : currentStage}</span>
               </h3>
               <p className="text-[11px] text-slate-500 dark:text-stone-400">بيانات المخدومين والخدام ونسب الحضور</p>
             </div>
             <div className="flex items-center gap-2">
-              {(role === 'amin_khedma_am' || currentUser?.canManageSupervisors) && onOpenUserManagement && (
+              {(role === 'amin_khedma_am' || currentUser?.isAdminAssistant || currentUser?.canManageSupervisors) && onOpenUserManagement && (
                 <button
                   onClick={onOpenUserManagement}
                   className="px-3 py-1.5 bg-gradient-to-r from-burgundy-700 to-burgundy-800 hover:from-burgundy-800 hover:to-burgundy-900 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors border border-churchgold-400/30 cursor-pointer"
@@ -235,7 +287,7 @@ export const HomeTab: React.FC<{
           </div>
 
           <div className="pt-3 border-t border-amber-100/60 dark:border-[#33111d] flex items-center justify-between text-xs text-slate-500 dark:text-stone-400 mt-2">
-            <span>المرحلة المختارة: <strong className="text-burgundy-700 dark:text-churchgold-300">{selectedStageScope === 'all' ? 'كافة المراحل والخدمات' : selectedStageScope}</strong></span>
+            <span>المرحلة المختارة: <strong className="text-burgundy-700 dark:text-churchgold-300">{currentStage === 'all' ? 'كافة المراحل والخدمات' : currentStage}</strong></span>
             <button
               onClick={() => setActiveTab('children_directory')}
               className="text-burgundy-700 dark:text-churchgold-400 font-bold hover:underline flex items-center gap-1 cursor-pointer"
@@ -271,16 +323,18 @@ export const HomeTab: React.FC<{
               <ArrowUpRight className="w-3.5 h-3.5 text-emerald-200" />
             </button>
 
-            <button
-              onClick={() => setActiveTab('servants_attendance')}
-              className="w-full py-2.5 bg-white/10 hover:bg-white/15 border border-churchgold-400/20 rounded-2xl flex items-center justify-between px-4 transition-all text-xs font-bold text-stone-100 cursor-pointer"
-            >
-              <span className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-churchgold-400"></span>
-                <span>تسجيل حضور الخدام الأسبوعي</span>
-              </span>
-              <ArrowUpRight className="w-3.5 h-3.5 text-churchgold-300" />
-            </button>
+            {role !== 'khadem' && role !== 'general_dock' && (
+              <button
+                onClick={() => setActiveTab('servants_attendance')}
+                className="w-full py-2.5 bg-white/10 hover:bg-white/15 border border-churchgold-400/20 rounded-2xl flex items-center justify-between px-4 transition-all text-xs font-bold text-stone-100 cursor-pointer"
+              >
+                <span className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-churchgold-400"></span>
+                  <span>تسجيل حضور الخدام الأسبوعي</span>
+                </span>
+                <ArrowUpRight className="w-3.5 h-3.5 text-churchgold-300" />
+              </button>
+            )}
 
             <button
               onClick={() => setActiveTab('children_directory')}
@@ -310,18 +364,20 @@ export const HomeTab: React.FC<{
               <div>
                 <h3 className="font-black text-slate-900 dark:text-stone-100 text-sm">التنبيهات والمناسبات القادمة</h3>
                 <p className="text-xs text-slate-500 dark:text-stone-400">
-                  {selectedStageScope === 'all' ? 'جميع تنبيهات الكنيسة والمراحل' : `التنبيهات الخاصة بمرحلة (${selectedStageScope}) والتنبيهات العامة`}
+                  {currentStage === 'all' ? 'جميع تنبيهات الكنيسة والمراحل' : `التنبيهات الخاصة بمرحلة (${currentStage}) والتنبيهات العامة`}
                 </p>
               </div>
             </div>
 
-            <button
-              onClick={() => setIsAddNotifOpen(true)}
-              className="px-3 py-2 bg-gradient-to-r from-burgundy-700 to-burgundy-800 hover:from-burgundy-800 hover:to-burgundy-900 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-burgundy-950/20 border border-churchgold-400/30 transition-all cursor-pointer"
-            >
-              <Plus className="w-4 h-4 text-churchgold-300" />
-              <span>إضافة تنبيه للمرحلة</span>
-            </button>
+            {(role === 'amin_khedma_am' || role === 'amin_fasl' || role === 'mosaed_amin') && (
+              <button
+                onClick={() => setIsAddNotifOpen(true)}
+                className="px-3 py-2 bg-gradient-to-r from-burgundy-700 to-burgundy-800 hover:from-burgundy-800 hover:to-burgundy-900 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-burgundy-950/20 border border-churchgold-400/30 transition-all cursor-pointer"
+              >
+                <Plus className="w-4 h-4 text-churchgold-300" />
+                <span>إضافة تنبيه للمرحلة</span>
+              </button>
+            )}
           </div>
 
           {/* Notifications List */}
@@ -334,6 +390,11 @@ export const HomeTab: React.FC<{
             ) : (
               filteredNotifications.map(n => {
                 const isGeneral = n.targetStage === 'عامة';
+                const canDeleteNotif =
+                  role === 'amin_khedma_am' ||
+                  ((role === 'amin_fasl' || role === 'mosaed_amin') &&
+                    n.targetStage !== 'عامة' &&
+                    n.targetStage === currentStage);
                 return (
                   <div key={n.id} className="p-4 rounded-2xl bg-[#fcfbf7] dark:bg-[#220b16] hover:bg-amber-50/50 dark:hover:bg-[#2b0e1c] border border-amber-200/60 dark:border-[#3d1523] transition-all space-y-2">
                     <div className="flex items-start justify-between gap-3">
@@ -356,7 +417,7 @@ export const HomeTab: React.FC<{
                         <h4 className="font-bold text-slate-900 dark:text-stone-100 text-sm">{n.title}</h4>
                       </div>
 
-                      {(role === 'amin_khedma_am' || role === 'amin_fasl') && (
+                      {canDeleteNotif && (
                         <button
                           onClick={() => deleteNotification(n.id)}
                           className="p-1.5 rounded-xl text-stone-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
@@ -527,16 +588,22 @@ export const HomeTab: React.FC<{
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold mb-1 text-slate-800 dark:text-stone-200">المرحلة المستهدفة</label>
-                  <select
-                    value={notifForm.targetStage}
-                    onChange={(e) => setNotifForm({ ...notifForm, targetStage: e.target.value as Stage })}
-                    className="w-full bg-slate-50 dark:bg-[#250d18] border border-amber-200/80 dark:border-[#4d1d2c] text-slate-900 dark:text-stone-100 rounded-xl px-3 py-2 font-bold focus:outline-none focus:ring-2 focus:ring-burgundy-600/30"
-                  >
-                    <option value="عامة">عامة (كافة المراحل)</option>
-                    {STAGES.map(s => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
+                  {role === 'amin_khedma_am' ? (
+                    <select
+                      value={notifForm.targetStage}
+                      onChange={(e) => setNotifForm({ ...notifForm, targetStage: e.target.value as Stage })}
+                      className="w-full bg-slate-50 dark:bg-[#250d18] border border-amber-200/80 dark:border-[#4d1d2c] text-slate-900 dark:text-stone-100 rounded-xl px-3 py-2 font-bold focus:outline-none focus:ring-2 focus:ring-burgundy-600/30"
+                    >
+                      <option value="عامة">عامة (كافة المراحل)</option>
+                      {stagesList.filter(s => s.name !== 'عامة').map(s => (
+                        <option key={s.id || s.name} value={s.name}>{s.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="w-full bg-burgundy-50 dark:bg-[#250d18] border border-burgundy-200/80 dark:border-[#4d1d2c] text-burgundy-900 dark:text-churchgold-300 rounded-xl px-3 py-2 font-bold">
+                      {currentStage === 'all' ? 'عامة' : currentStage}
+                    </div>
+                  )}
                 </div>
 
                 <div>

@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { useApp, TabId } from '../context/AppContext';
-import { STAGES } from '../data/mockData';
 import { 
   Menu, Cake, ShieldCheck, Crown, Users, BookOpen, 
-  Home, UserCheck, CalendarCheck, Filter, Sparkles, ChevronDown, User, KeyRound, LogOut, Layers, Smartphone
+  Home, UserCheck, CalendarCheck, User, LogOut, Layers, ChevronDown
 } from 'lucide-react';
 import { parseBirthDate } from './BirthdayWidget';
 import { ThemeToggle } from './ThemeToggle';
 import { PWAInstallButton } from './PWAInstallButton';
+import { ClassContextSwitcher } from './ClassContextSwitcher';
+import { isSafeImageUrl } from '../utils/imageHelper';
 
 interface AppHeaderProps {
   onToggleSidebar: () => void;
@@ -27,7 +28,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 }) => {
   const { 
     activeTab, setActiveTab, role, currentUser, selectedStageScope, 
-    setSelectedStageScope, children, servants, logout 
+    activeStageName, activeRoleInStage, children, servants, logout 
   } = useApp();
 
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
@@ -37,7 +38,12 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   const todayDay = today.getDate();
   const currentMonthNum = today.getMonth() + 1;
 
-  const effectiveStage = role === 'amin_khedma_am' ? selectedStageScope : (currentUser?.assignedStage || selectedStageScope);
+  const effectiveStage =
+    role === 'amin_khedma_am'
+      ? selectedStageScope
+      : activeStageName !== 'all'
+        ? activeStageName
+        : (currentUser?.assignedStage || selectedStageScope);
   const scopedKids = effectiveStage === 'all' ? children : children.filter(c => c.stage === effectiveStage);
   
   const todayKidsCount = scopedKids.filter(c => {
@@ -128,45 +134,26 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             <span>حضور الأولاد</span>
           </button>
 
-          <button
-            onClick={() => setActiveTab('servants_attendance')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
-              activeTab === 'servants_attendance'
-                ? 'bg-emerald-800 text-white shadow-xs'
-                : 'text-stone-600 dark:text-stone-300 hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-white/50'
-            }`}
-          >
-            <CalendarCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-            <span>تسجيل حضور الخدام</span>
-          </button>
+          {role !== 'khadem' && role !== 'general_dock' && (
+            <button
+              onClick={() => setActiveTab('servants_attendance')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                activeTab === 'servants_attendance'
+                  ? 'bg-emerald-800 text-white shadow-xs'
+                  : 'text-stone-600 dark:text-stone-300 hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-white/50'
+              }`}
+            >
+              <CalendarCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>تسجيل حضور الخدام</span>
+            </button>
+          )}
         </div>
 
-        {/* Right Side (in RTL): Stage Filter Scope + Birthday alert + Theme Toggle + User Avatar */}
+        {/* Right Side (in RTL): Multi-Class Context Switcher + Birthday alert + Theme Toggle + User Avatar */}
         <div className="flex items-center gap-2">
           
-          {/* Stage Scope Selector for Amin Khedma Am (Hidden on Mobile as requested) */}
-          {role === 'amin_khedma_am' ? (
-            <div className="hidden md:flex items-center gap-1.5 bg-[#fdfbf7] dark:bg-[#230d17] border border-amber-200/80 dark:border-[#4c1c2b] rounded-xl px-2.5 py-1 text-xs shadow-2xs">
-              <Filter className="w-3.5 h-3.5 text-burgundy-700 dark:text-churchgold-400 shrink-0" />
-              <span className="text-[11px] font-bold text-slate-500 dark:text-stone-400 hidden lg:inline">عرض المرحلة:</span>
-              <select
-                value={selectedStageScope}
-                onChange={(e) => setSelectedStageScope(e.target.value as any)}
-                id="header-stage-scope-select"
-                className="bg-transparent font-bold text-slate-800 dark:text-stone-200 text-xs focus:outline-none cursor-pointer"
-              >
-                <option value="all" className="dark:bg-[#1f0b14] dark:text-white">جميع المراحل ({children.length} ولد)</option>
-                {STAGES.map(s => (
-                  <option key={s} value={s} className="dark:bg-[#1f0b14] dark:text-white">{s}</option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <div className="hidden sm:flex items-center gap-1.5 bg-burgundy-50 dark:bg-[#260f18] border border-burgundy-200/70 dark:border-[#4d1f2e] text-burgundy-900 dark:text-churchgold-300 rounded-xl px-2.5 py-1 text-xs font-bold shadow-2xs">
-              <ShieldCheck className="w-3.5 h-3.5 text-burgundy-700 dark:text-churchgold-400 shrink-0" />
-              <span className="truncate max-w-[130px]">{currentUser?.assignedStage || selectedStageScope}</span>
-            </div>
-          )}
+          {/* Smart Tree Context Switcher */}
+          <ClassContextSwitcher variant="header" />
 
           {/* Birthday Widget Quick Trigger */}
           <button
@@ -203,9 +190,17 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
               id="header-profile-menu-btn"
               className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-amber-50/60 hover:bg-amber-100/70 dark:bg-[#230d17] dark:hover:bg-[#2f111f] border border-amber-200/80 dark:border-[#4c1c2b] text-slate-800 dark:text-stone-200 text-xs font-bold transition-colors cursor-pointer"
             >
-              <div className="w-6 h-6 rounded-lg bg-burgundy-800 text-churchgold-300 ring-1 ring-churchgold-500/50 flex items-center justify-center text-xs font-black shadow-xs">
-                {currentUser?.name?.charAt(0) || 'م'}
-              </div>
+              {isSafeImageUrl(currentUser?.avatarUrl) ? (
+                <img
+                  src={currentUser?.avatarUrl}
+                  alt={currentUser?.name || 'صورة المستخدم'}
+                  className="w-6 h-6 rounded-lg object-cover ring-1 ring-churchgold-500/50 shadow-xs"
+                />
+              ) : (
+                <div className="w-6 h-6 rounded-lg bg-burgundy-800 text-churchgold-300 ring-1 ring-churchgold-500/50 flex items-center justify-center text-xs font-black shadow-xs">
+                  {currentUser?.name?.charAt(0) || 'م'}
+                </div>
+              )}
               <span className="hidden md:inline max-w-[100px] truncate">{currentUser?.name}</span>
               <ChevronDown className="w-3 h-3 text-slate-400 dark:text-stone-400" />
             </button>
@@ -216,7 +211,11 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                   <div className="font-bold text-slate-900 dark:text-stone-100">{currentUser?.name}</div>
                   <div className="text-[10px] text-slate-500 dark:text-stone-400">@{currentUser?.username}</div>
                   <div className="text-[10px] text-burgundy-800 dark:text-churchgold-400 font-extrabold mt-0.5">
-                    {currentUser?.role === 'amin_khedma_am' ? 'أمين الخدمة العام' : `المرحلة: ${currentUser?.assignedStage || 'عامة'}`}
+                    {currentUser?.role === 'amin_khedma_am'
+                      ? 'أمين الخدمة العام'
+                      : currentUser?.isAdminAssistant
+                        ? 'مساعد إداري للخدمة'
+                        : `${activeRoleInStage === 'amin_fasl' ? 'أمين مرحلة' : activeRoleInStage === 'mosaed_amin' ? 'مساعد أمين' : 'خادم'} • ${activeStageName !== 'all' ? activeStageName : (currentUser?.assignedStage || 'عامة')}`}
                   </div>
                 </div>
 
@@ -233,7 +232,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                   </button>
                 )}
 
-                {role === 'amin_khedma_am' && (
+                {(currentUser?.role === 'amin_khedma_am' || Boolean(currentUser?.isAdminAssistant)) && (
                   <>
                     <button
                       onClick={() => {

@@ -2,12 +2,14 @@ import React from 'react';
 import { useApp, TabId } from '../context/AppContext';
 import { 
   Home, BookOpen, Users, UserCheck, ShieldCheck, 
-  CalendarCheck, Crown, Cake, LogOut, Cross, 
-  Settings, RotateCcw, X, Sparkles, ChevronLeft, Layers, Database
+  CalendarCheck, Crown, Cake, LogOut, 
+  Settings, RotateCcw, X, ChevronLeft, Layers
 } from 'lucide-react';
 import { parseBirthDate } from './BirthdayWidget';
 import { ThemeToggle } from './ThemeToggle';
 import { PWAInstallButton } from './PWAInstallButton';
+import { ClassContextSwitcher } from './ClassContextSwitcher';
+import { isSafeImageUrl } from '../utils/imageHelper';
 
 interface SidebarProps {
   isOpenMobile: boolean;
@@ -36,7 +38,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenServicesManager,
   onResetData
 }) => {
-  const { role, activeTab, setActiveTab, currentUser, logout, children, servants, selectedStageScope } = useApp();
+  const { role, activeTab, setActiveTab, currentUser, logout, children, servants, selectedStageScope, activeStageName } = useApp();
   const [showResetConfirm, setShowResetConfirm] = React.useState(false);
 
   // Compute today's birthdays count
@@ -44,7 +46,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const todayDay = today.getDate();
   const currentMonthNum = today.getMonth() + 1;
 
-  const effectiveStage = role === 'amin_khedma_am' ? selectedStageScope : (currentUser?.assignedStage || selectedStageScope);
+  const effectiveStage =
+    role === 'amin_khedma_am'
+      ? selectedStageScope
+      : activeStageName !== 'all'
+        ? activeStageName
+        : (currentUser?.assignedStage || selectedStageScope);
   const scopedKids = effectiveStage === 'all' ? children : children.filter(c => c.stage === effectiveStage);
   
   const todayKidsCount = scopedKids.filter(c => {
@@ -115,36 +122,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   // Filter based on user role
-  const isKhadem = role === 'khadem';
-  const isAminFasl = role === 'amin_fasl';
-  const isAminAm = role === 'amin_khedma_am' || currentUser?.canManageSupervisors;
-  const isGeneralServant = isKhadem && (!currentUser?.assignedStage || currentUser?.assignedStage === 'عامة');
+  const isKhadem = role === 'khadem' || role === 'general_dock';
+  const isAminFasl = role === 'amin_fasl' || role === 'mosaed_amin';
+  const isAminAm =
+    role === 'amin_khedma_am' ||
+    Boolean(currentUser?.isAdminAssistant) ||
+    Boolean(currentUser?.canManageSupervisors);
 
   const canShowItem = (item: NavItem) => {
-    // 1. الخادم العادي: متاح له الرئيسية والمكتبة وكشف وحضور مخدومي مرحلته بالإضافة لتسجيل ودليل الخدام
+    // 1. الخادم العادي: الرئيسية والمكتبة ودليل وحضور مخدومي فصله النشط فقط (بدون أقسام الخدام أو الأمناء)
     if (isKhadem) {
       return (
         item.id === 'home' ||
         item.id === 'library' ||
         item.id === 'children_attendance' ||
-        item.id === 'children_directory' ||
-        item.id === 'servants_attendance' ||
-        item.id === 'servants_directory'
+        item.id === 'children_directory'
       );
     }
 
-    // 2. أمين المرحلة ومساعد الأمين: متاح له مخدوميه + كشف وحضور خدام مرحلته
+    // 2. أمين المرحلة ومساعد الأمين: مخدومو المرحلة + دليل وحضور خدام المرحلة النشطة
     if (isAminFasl) {
-      if (item.category === 'main' || item.category === 'children' || item.category === 'servants') return true;
-      return false; // لا يرى كشف الأمناء ولا حضور الأمناء
+      return item.category === 'main' || item.category === 'children' || item.category === 'servants';
     }
 
-    // 3. الأمين العام: كامل الصلاحيات لجميع الأقسام (المخدومين، كشف وحضور الخدام، كشف وحضور الأمناء)
+    // 3. الأمين العام / المساعد الإداري: كامل الصلاحيات لجميع الأقسام
     if (isAminAm) {
       return true;
     }
 
-    return true;
+    return false;
   };
 
   const visibleItems = navItems.filter(canShowItem);
@@ -160,8 +166,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const getRoleArabicTitle = () => {
-    if (role === 'amin_khedma_am') return 'أمين الخدمة العام';
+    if (currentUser?.role === 'amin_khedma_am') return 'أمين الخدمة العام';
+    if (currentUser?.isAdminAssistant) return 'مساعد إداري للخدمة';
     if (role === 'amin_fasl') return 'أمين مرحلة وفصل';
+    if (role === 'mosaed_amin') return 'مساعد أمين مرحلة';
+    if (role === 'general_dock') return 'خادم عام';
     return 'خادم فصل';
   };
 
@@ -219,15 +228,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="p-2.5 mx-2.5 mt-2 rounded-xl bg-[#220b15] border border-[#3e1624] shadow-xs space-y-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 min-w-0">
-              <div className="w-7 h-7 rounded-lg bg-burgundy-900 text-churchgold-300 border border-churchgold-500/30 flex items-center justify-center font-black text-xs shrink-0 shadow-xs">
-                {currentUser?.name?.slice(0, 2) || 'خ'}
-              </div>
+              {isSafeImageUrl(currentUser?.avatarUrl) ? (
+                <img
+                  src={currentUser?.avatarUrl}
+                  alt={currentUser?.name || 'صورة الخادم'}
+                  className="w-7 h-7 rounded-lg object-cover border border-churchgold-500/40 shrink-0 shadow-xs"
+                />
+              ) : (
+                <div className="w-7 h-7 rounded-lg bg-burgundy-900 text-churchgold-300 border border-churchgold-500/30 flex items-center justify-center font-black text-xs shrink-0 shadow-xs">
+                  {currentUser?.name?.slice(0, 2) || 'خ'}
+                </div>
+              )}
               <div className="overflow-hidden">
                 <div className="text-xs font-bold text-stone-100 truncate max-w-[125px]">
                   {currentUser?.name || 'مستخدم'}
                 </div>
                 <div className="text-[10px] text-churchgold-400 font-bold truncate">
-                  {getRoleArabicTitle()} • {currentUser?.assignedStage || selectedStageScope}
+                  {getRoleArabicTitle()} • {activeStageName !== 'all' ? activeStageName : (currentUser?.assignedStage || selectedStageScope)}
                 </div>
               </div>
             </div>
@@ -241,20 +258,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           </div>
 
-          {/* Quick Profile & AI Inspector buttons */}
-          <div className="grid grid-cols-2 gap-1.5 pt-1.5 border-t border-[#351320] text-[10px]">
-            {onOpenProfile && (
+          {/* Multi-Class Switcher / Admin Stage Scope in Sidebar */}
+          <ClassContextSwitcher variant="sidebar" />
+
+          {/* Quick Profile button */}
+          {onOpenProfile && (
+            <div className="pt-1.5 border-t border-[#351320] text-[10px]">
               <button
                 onClick={() => {
                   onOpenProfile();
                   onCloseMobile();
                 }}
-                className="flex items-center justify-center gap-1 py-1 rounded-lg bg-[#2e101d] hover:bg-[#3d1627] text-stone-200 font-bold border border-[#4a1c2f] transition-colors cursor-pointer"
+                className="w-full flex items-center justify-center gap-1 py-1.5 rounded-lg bg-[#2e101d] hover:bg-[#3d1627] text-stone-200 font-bold border border-[#4a1c2f] transition-colors cursor-pointer"
               >
                 <span>بياناتي الشخصية</span>
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {/* Navigation Links Scrollable List */}
@@ -458,7 +478,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* Utility Row: Theme Switcher & Admin-Only Reset in a clean single strip */}
           <div className="flex items-center justify-between pt-1 border-t border-[#260a16] text-[11px]">
             <ThemeToggle variant="full" />
-            {role === 'amin_khedma_am' && (
+            {currentUser?.role === 'amin_khedma_am' && (
               <button
                 onClick={() => setShowResetConfirm(true)}
                 className="p-1.5 rounded-lg text-stone-400 hover:text-stone-200 hover:bg-[#280e1a] transition-colors cursor-pointer"

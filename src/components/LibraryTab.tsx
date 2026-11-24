@@ -1,41 +1,47 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Book, BookCategory, Stage } from '../types';
+import { Book, Stage } from '../types';
 import { 
   BookOpen, Sparkles, Download, Eye, Plus, Search, 
-  FileText, Bookmark, Calendar, User, Trash2, CheckCircle2, ShieldCheck, FileCheck, Layers, Settings2
+  FileText, Bookmark, User, Trash2, ShieldCheck, FileCheck, Layers, Settings2
 } from 'lucide-react';
 import { getStageBadgeClass } from '../utils/themeColors';
+import { isSafeImageUrl } from '../utils/imageHelper';
 
 export const LibraryTab: React.FC<{ onOpenAddBook: () => void; onViewBook: (book: Book) => void }> = ({
   onOpenAddBook,
   onViewBook
 }) => {
-  const { books, deleteBook, selectedStageScope, role, currentUser, stagesList } = useApp();
+  const { books, deleteBook, selectedStageScope, activeStageName, role, currentUser, stagesList } = useApp();
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   
   const isAminAm = role === 'amin_khedma_am';
-  const isKhadem = role === 'khadem';
-  const isGeneralServant = isKhadem && (!currentUser?.assignedStage || currentUser?.assignedStage === 'عامة');
+  const isStageLeader = role === 'amin_fasl' || role === 'mosaed_amin';
+  const isKhadem = role === 'khadem' || role === 'general_dock';
+  const userStage =
+    activeStageName !== 'all'
+      ? activeStageName
+      : (currentUser?.assignedStage || selectedStageScope);
+  const isGeneralServant = isKhadem && (!userStage || userStage === 'عامة' || userStage === 'all');
   const [bookToDelete, setBookToDelete] = useState<Book | null>(null);
 
   const [selectedStage, setSelectedStage] = useState<string>(() => {
     if (isAminAm) return selectedStageScope;
     if (isGeneralServant) return 'عامة';
-    return currentUser?.assignedStage || selectedStageScope;
+    return userStage;
   });
 
-  // Sync state if selectedStageScope changes from global scope selector
+  // Sync state if selectedStageScope or activeStageName changes
   React.useEffect(() => {
     if (isAminAm) {
       setSelectedStage(selectedStageScope);
     } else if (isGeneralServant) {
       setSelectedStage('عامة');
     } else {
-      setSelectedStage(currentUser?.assignedStage || selectedStageScope);
+      setSelectedStage(userStage);
     }
-  }, [selectedStageScope, isAminAm, isGeneralServant, currentUser]);
+  }, [selectedStageScope, userStage, isAminAm, isGeneralServant]);
 
   const filteredBooks = books.filter(book => {
     const matchesCategory = activeCategory === 'all' || book.category === activeCategory;
@@ -48,25 +54,27 @@ export const LibraryTab: React.FC<{ onOpenAddBook: () => void; onViewBook: (book
     let matchesStage = false;
 
     if (isGeneralServant) {
-      // الخدام في العامة: لا يظهر لهم سوى الكتب المخصصة لـ "عامة"
-      matchesStage = (book.targetStages?.includes('عامة') || book.targetStage === 'عامة') ?? false;
+      matchesStage =
+        book.visibility === 'all' ||
+        book.targetStages?.includes('عامة') ||
+        book.targetStage === 'عامة';
     } else if (isAminAm) {
-      // الأمين العام يرى جميع الكتب ويمكنه الفلترة بأي مرحلة
       if (selectedStage === 'all') {
         matchesStage = true;
       } else {
         matchesStage = (
+          book.visibility === 'all' ||
           book.targetStages?.includes(selectedStage as Stage) ||
           book.targetStage === selectedStage
         ) ?? false;
       }
     } else {
-      // خدام وأمناء المراحل النوعية: يرون كتب مرحلتهم + الكتب العامة
-      const userStage = (currentUser?.assignedStage || selectedStageScope) as Stage;
+      const stageTarget = userStage as Stage;
       matchesStage = (
-        book.targetStages?.includes(userStage) ||
+        book.visibility === 'all' ||
+        book.targetStages?.includes(stageTarget) ||
         book.targetStages?.includes('عامة') ||
-        book.targetStage === userStage ||
+        book.targetStage === stageTarget ||
         book.targetStage === 'عامة'
       ) ?? false;
     }
@@ -104,8 +112,8 @@ export const LibraryTab: React.FC<{ onOpenAddBook: () => void; onViewBook: (book
             </p>
           </div>
 
-          {/* Add Book Button: Amin Am Only */}
-          {isAminAm && (
+          {/* Add Book Button: Amin Am & Stage Leaders */}
+          {(isAminAm || isStageLeader) && (
             <button
               onClick={onOpenAddBook}
               className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-gradient-to-r from-churchgold-600 to-amber-600 hover:from-churchgold-700 hover:to-amber-700 text-burgundy-950 font-black text-sm shadow-lg transition-all hover:scale-102 active:scale-98 shrink-0 cursor-pointer border border-churchgold-400/40"
@@ -220,7 +228,7 @@ export const LibraryTab: React.FC<{ onOpenAddBook: () => void; onViewBook: (book
           ) : (
             <div className="bg-churchgold-50 dark:bg-[#2a0d1b] border border-churchgold-300 dark:border-[#4d1d2c] text-burgundy-900 dark:text-churchgold-300 rounded-xl px-3 py-2 text-xs font-bold flex items-center gap-1.5 shadow-2xs shrink-0">
               <ShieldCheck className="w-3.5 h-3.5 text-churchgold-600 shrink-0" />
-              <span>مرحلتك المسندة: {currentUser?.assignedStage || selectedStageScope}</span>
+              <span>مرحلتك المسندة: {userStage}</span>
             </div>
           )}
         </div>
@@ -240,9 +248,16 @@ export const LibraryTab: React.FC<{ onOpenAddBook: () => void; onViewBook: (book
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredBooks.map(book => {
-            const stagesList = (book.targetStages && book.targetStages.length > 0) 
+            const bookStages = (book.targetStages && book.targetStages.length > 0) 
               ? book.targetStages 
               : [book.targetStage || 'عامة'];
+            const hasSafeCover = isSafeImageUrl(book.coverImage);
+            const canManageThisBook =
+              isAminAm ||
+              (isStageLeader &&
+                book.visibility !== 'all' &&
+                !bookStages.includes('عامة') &&
+                bookStages.includes(userStage as Stage));
 
             return (
               <div 
@@ -253,12 +268,12 @@ export const LibraryTab: React.FC<{ onOpenAddBook: () => void; onViewBook: (book
                   {/* Book Header Cover */}
                   <div 
                     className={`p-5 min-h-[130px] text-white relative flex flex-col justify-between ${
-                      book.coverImage 
+                      hasSafeCover 
                         ? 'bg-slate-900' 
                         : `bg-gradient-to-r ${book.coverBg || 'from-burgundy-900 to-burgundy-950'}`
                     }`}
                   >
-                    {book.coverImage && (
+                    {hasSafeCover && (
                       <div 
                         className="absolute inset-0 opacity-40 bg-cover bg-center transition-all group-hover:scale-105" 
                         style={{ backgroundImage: `url(${book.coverImage})` }} 
@@ -267,7 +282,7 @@ export const LibraryTab: React.FC<{ onOpenAddBook: () => void; onViewBook: (book
 
                     <div className="relative z-10 flex items-start justify-between gap-2 mb-2">
                       <div className="flex flex-wrap gap-1.5 max-w-[80%]">
-                        {stagesList.map(stg => (
+                        {bookStages.map(stg => (
                           <span key={stg} className={`px-2 py-0.5 rounded-lg text-[10px] font-black border ${getStageBadgeClass(stg)}`}>
                             {stg}
                           </span>
@@ -280,12 +295,12 @@ export const LibraryTab: React.FC<{ onOpenAddBook: () => void; onViewBook: (book
                         )}
                       </div>
 
-                      {/* Delete Book: Amin Am Only */}
-                      {isAminAm && (
+                      {/* Delete Book: Amin Am or stage leader for stage-scoped book */}
+                      {canManageThisBook && (
                         <button
                           onClick={() => setBookToDelete(book)}
                           className="p-1.5 rounded-lg bg-black/30 hover:bg-rose-600 text-white/80 hover:text-white transition-colors cursor-pointer shrink-0"
-                          title="حذف الكتاب (صلاحية أمين الخدمة العام)"
+                          title="حذف الكتاب"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -325,7 +340,7 @@ export const LibraryTab: React.FC<{ onOpenAddBook: () => void; onViewBook: (book
                     {/* Stage Visibility Tags on Card */}
                     <div className="pt-1 flex flex-wrap items-center gap-1 text-[10px] text-slate-500 dark:text-stone-400">
                       <span className="font-semibold">يظهر لـ:</span>
-                      {stagesList.map(stg => (
+                      {bookStages.map(stg => (
                         <span key={stg} className="px-1.5 py-0.5 rounded bg-stone-100 dark:bg-[#200c17] text-slate-700 dark:text-stone-300 border border-amber-200/40">
                           {stg}
                         </span>

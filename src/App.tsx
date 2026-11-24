@@ -55,14 +55,14 @@ function AppContent() {
   useEffect(() => {
     if (!currentUser) return;
 
-    if (role === 'khadem') {
+    if (role === 'khadem' || role === 'general_dock') {
       const allowedKhademTabs: TabId[] = [
-        'home', 'library', 'children_attendance', 'children_directory', 'servants_attendance', 'servants_directory'
+        'home', 'library', 'children_attendance', 'children_directory'
       ];
       if (!allowedKhademTabs.includes(activeTab)) {
         setActiveTab('children_attendance');
       }
-    } else if (role === 'amin_fasl') {
+    } else if (role === 'amin_fasl' || role === 'mosaed_amin') {
       const allowedAminFaslTabs: TabId[] = [
         'home', 'library', 'children_attendance', 'children_directory',
         'servants_directory', 'servants_attendance'
@@ -148,16 +148,16 @@ function AppContent() {
   };
 
   // Person Save Handler
-  const handleSavePerson = (data: any) => {
+  const handleSavePerson = async (data: any) => {
     if (personModalType === 'child') {
-      if (editingPerson) updateChild(editingPerson.id, data);
-      else addChild(data);
+      if (editingPerson) await updateChild(editingPerson.id, data);
+      else await addChild(data);
     } else if (personModalType === 'servant') {
-      if (editingPerson) updateServant(editingPerson.id, data);
-      else addServant(data);
+      if (editingPerson) await updateServant(editingPerson.id, data);
+      else await addServant(data);
     } else {
-      if (editingPerson) updateSupervisor(editingPerson.id, data);
-      else addSupervisor(data);
+      if (editingPerson) await updateSupervisor(editingPerson.id, data);
+      else await addSupervisor(data);
     }
   };
 
@@ -259,7 +259,7 @@ function AppContent() {
             </div>
 
             <div className="flex items-center gap-4">
-              {role === 'amin_khedma_am' && (
+              {currentUser?.role === 'amin_khedma_am' && (
                 <button
                   onClick={() => setShowFooterResetConfirm(true)}
                   className="inline-flex items-center gap-1 text-stone-400 hover:text-burgundy-700 dark:hover:text-churchgold-300 font-bold transition-colors cursor-pointer"

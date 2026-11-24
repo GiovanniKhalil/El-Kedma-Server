@@ -25,7 +25,7 @@ export const ChildrenDirectoryTab: React.FC<{
 }> = ({ onAddChild, onEditChild, onViewChild }) => {
   const { 
     children, addChild, batchAddChildren, deleteChild, filters, setFilters, 
-    resetFilters, role, currentUser, selectedStageScope, stagesList, promoteAllStages 
+    resetFilters, role, currentUser, selectedStageScope, activeStageName, stagesList, promoteAllStages 
   } = useApp();
   const [viewingAttendanceChild, setViewingAttendanceChild] = useState<Child | null>(null);
   const [selectedDetailsChild, setSelectedDetailsChild] = useState<Child | null>(null);
@@ -44,16 +44,21 @@ export const ChildrenDirectoryTab: React.FC<{
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccessMsg, setImportSuccessMsg] = useState<string | null>(null);
 
+  const canModifyChildren = !(currentUser?.isAdminAssistant && currentUser?.canAssignMakhdomeen === false);
+
   const userStages = Array.from(new Set([
     currentUser?.assignedStage,
-    ...(currentUser?.assignedStages || [])
+    ...(currentUser?.assignedStages || []),
+    ...(currentUser?.assignments || []).map(a => a.stageName)
   ].filter(Boolean))) as string[];
 
   const effectiveStage = role === 'amin_khedma_am' 
     ? filters.stageFilter 
-    : (userStages.length > 1 && filters.stageFilter !== 'all' 
-        ? filters.stageFilter 
-        : (filters.stageFilter !== 'all' ? filters.stageFilter : (currentUser?.assignedStage || selectedStageScope)));
+    : (filters.stageFilter !== 'all'
+        ? filters.stageFilter
+        : (activeStageName && activeStageName !== 'all'
+            ? activeStageName
+            : (currentUser?.assignedStage || selectedStageScope)));
 
   // Search and Filter Logic
   const filteredChildren = children.filter(child => {
@@ -146,18 +151,20 @@ export const ChildrenDirectoryTab: React.FC<{
           </div>
 
           {/* Quick Add Button (visible on mobile in header) */}
-          <button
-            onClick={onAddChild}
-            className="sm:hidden inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-burgundy-800 hover:bg-burgundy-900 text-white text-xs font-bold shadow-xs border border-churchgold-400/30 cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5 text-churchgold-300" />
-            <span>إضافة ولد</span>
-          </button>
+          {canModifyChildren && (
+            <button
+              onClick={onAddChild}
+              className="sm:hidden inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-burgundy-800 hover:bg-burgundy-900 text-white text-xs font-bold shadow-xs border border-churchgold-400/30 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5 text-churchgold-300" />
+              <span>إضافة ولد</span>
+            </button>
+          )}
         </div>
 
         {/* Action Buttons for Desktop / Tablet */}
         <div className="hidden sm:flex items-center gap-2">
-          {role === 'amin_khedma_am' && (
+          {role === 'amin_khedma_am' && canModifyChildren && (
             <button
               onClick={() => setShowPromoteConfirm(true)}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300 text-xs font-bold border border-emerald-300 dark:border-emerald-800 transition-colors cursor-pointer"
@@ -169,21 +176,25 @@ export const ChildrenDirectoryTab: React.FC<{
           )}
 
           {/* Excel Import Button */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-[#28131d] hover:bg-amber-100 dark:hover:bg-[#381a28] text-amber-900 dark:text-churchgold-300 text-xs font-bold transition-colors border border-amber-300/80 dark:border-[#541e33] cursor-pointer"
-            title="استيراد كشف أولاد من ملف Excel أو CSV"
-          >
-            <Upload className="w-3.5 h-3.5 text-amber-700 dark:text-churchgold-400" />
-            <span>استيراد Excel</span>
-          </button>
-          <input
-            type="file"
-            ref={fileInputRef}
-            accept=".xlsx, .xls, .csv, text/csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
-            onChange={handleFileUpload}
-            className="hidden"
-          />
+          {canModifyChildren && (
+            <>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-[#28131d] hover:bg-amber-100 dark:hover:bg-[#381a28] text-amber-900 dark:text-churchgold-300 text-xs font-bold transition-colors border border-amber-300/80 dark:border-[#541e33] cursor-pointer"
+                title="استيراد كشف أولاد من ملف Excel أو CSV"
+              >
+                <Upload className="w-3.5 h-3.5 text-amber-700 dark:text-churchgold-400" />
+                <span>استيراد Excel</span>
+              </button>
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept=".xlsx, .xls, .csv, text/csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+            </>
+          )}
 
           <button
             onClick={downloadSampleTemplate}
@@ -212,13 +223,15 @@ export const ChildrenDirectoryTab: React.FC<{
             <span>تصدير PDF / طباعة</span>
           </button>
 
-          <button
-            onClick={onAddChild}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-burgundy-700 to-burgundy-800 hover:from-burgundy-800 hover:to-burgundy-900 text-white text-xs font-bold transition-all shadow-xs border border-churchgold-400/30 cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5 text-churchgold-300" />
-            <span>إضافة ولد جديد</span>
-          </button>
+          {canModifyChildren && (
+            <button
+              onClick={onAddChild}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-burgundy-700 to-burgundy-800 hover:from-burgundy-800 hover:to-burgundy-900 text-white text-xs font-bold transition-all shadow-xs border border-churchgold-400/30 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5 text-churchgold-300" />
+              <span>إضافة ولد جديد</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -585,22 +598,24 @@ export const ChildrenDirectoryTab: React.FC<{
                     <span>البيانات الإضافية والتفاصيل ➔</span>
                   </button>
 
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => onEditChild(child)}
-                      className="p-2 rounded-xl bg-stone-100 dark:bg-[#250d18] text-amber-800 dark:text-churchgold-300 hover:bg-amber-100 dark:hover:bg-[#381421] border border-amber-200/80 dark:border-[#4d1d2c] transition-colors cursor-pointer"
-                      title="تعديل بيانات المخدوم"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => setChildToDelete(child)}
-                      className="p-2 rounded-xl bg-rose-50 dark:bg-[#290d16] text-rose-700 hover:bg-rose-100 dark:hover:bg-[#3d1320] border border-rose-200 dark:border-[#521c2e] transition-colors cursor-pointer"
-                      title="حذف المخدوم"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                  {canModifyChildren && (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => onEditChild(child)}
+                        className="p-2 rounded-xl bg-stone-100 dark:bg-[#250d18] text-amber-800 dark:text-churchgold-300 hover:bg-amber-100 dark:hover:bg-[#381421] border border-amber-200/80 dark:border-[#4d1d2c] transition-colors cursor-pointer"
+                        title="تعديل بيانات المخدوم"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => setChildToDelete(child)}
+                        className="p-2 rounded-xl bg-rose-50 dark:bg-[#290d16] text-rose-700 hover:bg-rose-100 dark:hover:bg-[#3d1320] border border-rose-200 dark:border-[#521c2e] transition-colors cursor-pointer"
+                        title="حذف المخدوم"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
                 </div>
 
               </div>
@@ -623,8 +638,12 @@ export const ChildrenDirectoryTab: React.FC<{
         onClose={() => setSelectedDetailsChild(null)}
         person={selectedDetailsChild}
         type="child"
-        onEdit={(c) => onEditChild(c as Child)}
-        onDelete={(id) => deleteChild(id)}
+        onEdit={(c) => {
+          if (canModifyChildren) onEditChild(c as Child);
+        }}
+        onDelete={(id) => {
+          if (canModifyChildren) deleteChild(id);
+        }}
         onViewAttendanceHistory={(c) => setViewingAttendanceChild(c as Child)}
       />
 

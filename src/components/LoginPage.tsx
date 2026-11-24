@@ -44,6 +44,7 @@ export const LoginPage: React.FC = () => {
   const [forgotSuccess, setForgotSuccess] = useState(false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pendingSuccessMessage, setPendingSuccessMessage] = useState<string | null>(null);
 
   // Handle Registration
   const handleRegisterSubmit = async (e: React.FormEvent) => {
@@ -72,6 +73,7 @@ export const LoginPage: React.FC = () => {
     }
 
     setIsSubmitting(true);
+    setPendingSuccessMessage(null);
     try {
       const res = await registerServant({
         name: regName.trim(),
@@ -85,6 +87,15 @@ export const LoginPage: React.FC = () => {
 
       if (!res.success) {
         setError(res.error || 'فشل تسجيل حساب الخادم');
+      } else if (res.pendingApproval) {
+        setRegName('');
+        setRegUsername('');
+        setRegPassword('');
+        setRegPhone('');
+        setRegNotes('');
+        setPendingSuccessMessage(
+          'تم إرسال طلب تسجيلك بنجاح! حسابك الآن قيد المراجعة والاعتماد من أمين الخدمة العام لتسكينك في الخدمة، وبعدها يمكنك تسجيل الدخول فوراً.'
+        );
       }
     } catch (err: any) {
       setError(err.message || 'حدث خطأ أثناء تسجيل الخادم');
@@ -235,6 +246,7 @@ export const LoginPage: React.FC = () => {
               onClick={() => {
                 setAuthMode('register');
                 setError(null);
+                setPendingSuccessMessage(null);
               }}
               className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                 authMode === 'register'
@@ -251,6 +263,7 @@ export const LoginPage: React.FC = () => {
               onClick={() => {
                 setAuthMode('login');
                 setError(null);
+                setPendingSuccessMessage(null);
               }}
               className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                 authMode === 'login'
@@ -284,6 +297,26 @@ export const LoginPage: React.FC = () => {
                 : 'أدخل اسم المستخدم أو رقم الهاتف وكلمة السر المعتمدة'}
             </p>
           </div>
+
+          {/* Pending Approval Success Banner */}
+          {pendingSuccessMessage && (
+            <div className="mb-4 p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border-2 border-emerald-500 text-emerald-950 dark:text-emerald-100 text-xs sm:text-sm font-bold space-y-2.5 animate-in fade-in">
+              <div className="flex items-start gap-2.5">
+                <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-600 dark:text-emerald-400 mt-0.5" />
+                <span className="leading-relaxed">{pendingSuccessMessage}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingSuccessMessage(null);
+                  setAuthMode('login');
+                }}
+                className="w-full py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-black cursor-pointer transition-colors"
+              >
+                الانتقال لشاشة تسجيل الدخول
+              </button>
+            </div>
+          )}
 
           {/* Error Banner */}
           {error && (
@@ -598,6 +631,7 @@ export const LoginPage: React.FC = () => {
                   onClick={() => {
                     setAuthMode('register');
                     setError(null);
+                    setPendingSuccessMessage(null);
                   }}
                   className="text-xs sm:text-sm font-black text-burgundy-800 dark:text-churchgold-400 hover:underline cursor-pointer"
                 >

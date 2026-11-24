@@ -6,6 +6,7 @@ import {
   Upload, Image as ImageIcon, FileCheck, CheckCircle2, Eye, ShieldCheck, Check
 } from 'lucide-react';
 import { getStageBadgeClass } from '../utils/themeColors';
+import { compressImageToDataUrl, isSafeImageUrl } from '../utils/imageHelper';
 
 interface BookModalProps {
   isOpen: boolean;
@@ -22,7 +23,12 @@ export const BookModal: React.FC<BookModalProps> = ({
   onAddBook,
   onUpdateBook
 }) => {
-  const { role, stagesList } = useApp();
+  const { role, stagesList, activeStageName, currentUser } = useApp();
+  const isAminAm = role === 'amin_khedma_am';
+  const userStage: Stage =
+    activeStageName !== 'all'
+      ? activeStageName
+      : (currentUser?.assignedStage || 'عامة');
 
   // All available stages for selection (including 'عامة')
   const availableStages: Stage[] = [
@@ -55,19 +61,6 @@ export const BookModal: React.FC<BookModalProps> = ({
   const [pageCount, setPageCount] = useState<number>(100);
   const [fileError, setFileError] = useState<string | null>(null);
 
-  // Sync state when bookToView changes
-  useEffect(() => {
-    if (bookToView) {
-      if (bookToView.targetStages && bookToView.targetStages.length > 0) {
-        setSelectedStages(bookToView.targetStages);
-      } else if (bookToView.targetStage) {
-        setSelectedStages([bookToView.targetStage]);
-      } else {
-        setSelectedStages(['عامة']);
-      }
-    }
-  }, [bookToView]);
-
   // Save feedback state
   const [stagesSavedMessage, setStagesSavedMessage] = useState(false);
 
@@ -80,10 +73,37 @@ export const BookModal: React.FC<BookModalProps> = ({
   // PDF Modal Embedded View State
   const [showPdfViewer, setShowPdfViewer] = useState(false);
 
-  if (!isOpen) return null;
+  // Sync state when bookToView or modal open status changes
+  useEffect(() => {
+    if (bookToView) {
+      if (bookToView.targetStages && bookToView.targetStages.length > 0) {
+        setSelectedStages(bookToView.targetStages);
+      } else if (bookToView.targetStage) {
+        setSelectedStages([bookToView.targetStage]);
+      } else {
+        setSelectedStages(['عامة']);
+      }
+      setFileError(null);
+      setShowPdfViewer(false);
+    } else if (isOpen) {
+      setTitle('');
+      setCategory('khedma');
+      setAuthor('اللجنة الإيبارشية لمدارس الأحد');
+      setYear('2026');
+      setDescription('');
+      setContentSummary('');
+      setPageCount(100);
+      setPdfUrl(undefined);
+      setPdfFileName(undefined);
+      setPdfFileSize(undefined);
+      setCoverImage(undefined);
+      setFileError(null);
+      setShowPdfViewer(false);
+      setSelectedStages(isAminAm ? ['عامة'] : [userStage]);
+    }
+  }, [bookToView, isOpen, isAminAm, userStage]);
 
-  const isViewMode = !!bookToView;
-  const isAminAm = role === 'amin_khedma_am';
+  if (!isOpen) return null;
 
   // Handle stage toggling
   const handleToggleStage = (stg: Stage) => {
@@ -110,13 +130,14 @@ export const BookModal: React.FC<BookModalProps> = ({
     if (!bookToView || !onUpdateBook) return;
     onUpdateBook(bookToView.id, {
       targetStages: selectedStages,
-      targetStage: selectedStages[0] || 'عامة'
+      targetStage: selectedStages[0] || 'عامة',
+      visibility: selectedStages.includes('عامة') ? 'all' : 'specific_stages'
     });
     setStagesSavedMessage(true);
     setTimeout(() => setStagesSavedMessage(false), 3000);
   };
 
-  // Handle PDF File Select
+  // Handle PDF File Select (700KB limit for Firestore document safety)
   const handlePdfFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -125,11 +146,17 @@ export const BookModal: React.FC<BookModalProps> = ({
       setFileError('يرجى اختيار ملف بصيغة PDF فقط');
       return;
     }
+
+    if (file.size > 700 * 1024) {
+      setFileError('حجم ملف PDF يتجاوز الحد المسموح به (700 كيلوبايت) لضمان الحفظ السحابي. يرجى ضغط الملف أولاً.');
+      e.target.value = '';
+      return;
+    }
     setFileError(null);
 
-    const sizeInMb = (file.size / (1024 * 1024)).toFixed(2);
+    const sizeInKb = Math.round(file.size / 1024);
     setPdfFileName(file.name);
-    setPdfFileSize(`${sizeInMb} ميجابايت`);
+    setPdfFileSize(`${sizeInKb} كيلوبايت`);
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -138,8 +165,8 @@ export const BookModal: React.FC<BookModalProps> = ({
     reader.readAsDataURL(file);
   };
 
-  // Handle Cover Image Select
-  const handleCoverImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle Cover Image Select with automatic canvas compression
+  const handleCoverImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -149,11 +176,16 @@ export const BookModal: React.FC<BookModalProps> = ({
     }
     setFileError(null);
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setCoverImage(event.target?.result as string);
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageToDataUrl(file, {
+        maxWidth: 480,
+        maxHeight: 640,
+        quality: 0.72
+      });
+      setCoverImage(compressed);
+    } catch (err: any) {
+      setFileError(err?.message || 'تعذر معالجة صورة الغلاف.');
+    }
   };
 
   // Handle Submit New Book
@@ -161,11 +193,16 @@ export const BookModal: React.FC<BookModalProps> = ({
     e.preventDefault();
     if (!title.trim() || !onAddBook) return;
 
+    const finalStages: Stage[] = isAminAm
+      ? (selectedStages.length > 0 ? selectedStages : ['عامة'])
+      : [userStage];
+
     onAddBook({
       title,
       category,
-      targetStage: selectedStages[0] || 'عامة',
-      targetStages: selectedStages.length > 0 ? selectedStages : ['عامة'],
+      visibility: finalStages.includes('عامة') ? 'all' : 'specific_stages',
+      targetStage: finalStages[0] || 'عامة',
+      targetStages: finalStages,
       author,
       year,
       description,
@@ -219,8 +256,8 @@ export const BookModal: React.FC<BookModalProps> = ({
           <div className="p-6 space-y-5 text-xs text-slate-700 dark:text-stone-300 max-h-[80vh] overflow-y-auto">
             
             {/* Book Cover Header Banner */}
-            <div className={`rounded-2xl overflow-hidden relative shadow-md ${bookToView.coverImage ? 'bg-slate-900' : `bg-gradient-to-r ${bookToView.coverBg || 'from-burgundy-900 to-burgundy-950'}`} text-white p-6 border border-churchgold-400/20`}>
-              {bookToView.coverImage && (
+            <div className={`rounded-2xl overflow-hidden relative shadow-md ${isSafeImageUrl(bookToView.coverImage) ? 'bg-slate-900' : `bg-gradient-to-r ${bookToView.coverBg || 'from-burgundy-900 to-burgundy-950'}`} text-white p-6 border border-churchgold-400/20`}>
+              {isSafeImageUrl(bookToView.coverImage) && (
                 <div className="absolute inset-0 opacity-30 bg-cover bg-center pointer-events-none" style={{ backgroundImage: `url(${bookToView.coverImage})` }} />
               )}
               <div className="relative z-10 space-y-3">
@@ -470,60 +507,72 @@ export const BookModal: React.FC<BookModalProps> = ({
               </select>
             </div>
 
-            {/* Multi-Stage Selector (Exclusive for General Secretary) */}
-            <div className="p-4 rounded-2xl bg-stone-50 dark:bg-[#250d18] border border-amber-200/80 dark:border-[#3e1423] space-y-2.5">
-              <div className="flex items-center justify-between">
-                <label className="block font-bold text-slate-900 dark:text-stone-100 text-xs flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-churchgold-600 dark:text-churchgold-400" />
-                  <span>تحديد المراحل التي يظهر لها هذا الكتاب *</span>
-                </label>
-                <span className="text-[10px] bg-churchgold-100 dark:bg-[#341121] text-churchgold-950 dark:text-churchgold-300 px-2 py-0.5 rounded font-bold border border-churchgold-300 dark:border-[#4d1d2c]">
-                  يمكن اختيار أكثر من مرحلة
+            {/* Multi-Stage Selector for General Admin; Locked Stage Badge for Stage Leaders */}
+            {isAminAm ? (
+              <div className="p-4 rounded-2xl bg-stone-50 dark:bg-[#250d18] border border-amber-200/80 dark:border-[#3e1423] space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="block font-bold text-slate-900 dark:text-stone-100 text-xs flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-churchgold-600 dark:text-churchgold-400" />
+                    <span>تحديد المراحل التي يظهر لها هذا الكتاب *</span>
+                  </label>
+                  <span className="text-[10px] bg-churchgold-100 dark:bg-[#341121] text-churchgold-950 dark:text-churchgold-300 px-2 py-0.5 rounded font-bold border border-churchgold-300 dark:border-[#4d1d2c]">
+                    يمكن اختيار أكثر من مرحلة
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-stone-400">
+                  اختر المراحل التي يسمح لخدامها بقراءة وتحميل هذا الكتاب. اختيار "عامة" يجعله ظاهراً لخدام العامة.
+                </p>
+
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {availableStages.map(stg => {
+                    const isSelected = selectedStages.includes(stg);
+                    return (
+                      <button
+                        key={stg}
+                        type="button"
+                        onClick={() => handleToggleStage(stg)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
+                          isSelected
+                            ? 'bg-churchgold-600 text-burgundy-950 border-churchgold-500 shadow-xs font-black'
+                            : 'bg-white dark:bg-[#1a0a12] text-slate-600 dark:text-stone-300 border-amber-200/80 dark:border-[#4d1d2c] hover:bg-amber-50'
+                        }`}
+                      >
+                        {isSelected && <Check className="w-3.5 h-3.5 text-burgundy-950" />}
+                        <span>{stg}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center gap-2 pt-1 text-[10px]">
+                  <button
+                    type="button"
+                    onClick={handleSelectAllStages}
+                    className="px-2.5 py-1 rounded-lg bg-stone-200 dark:bg-[#341121] text-slate-700 dark:text-stone-200 font-bold hover:bg-stone-300 cursor-pointer"
+                  >
+                    اختيار كل المراحل
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSelectGeneralOnly}
+                    className="px-2.5 py-1 rounded-lg bg-stone-200 dark:bg-[#341121] text-slate-700 dark:text-stone-200 font-bold hover:bg-stone-300 cursor-pointer"
+                  >
+                    عامة فقط
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-3.5 rounded-2xl bg-burgundy-50 dark:bg-[#250d18] border border-burgundy-200/80 dark:border-[#3e1423] flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-burgundy-700 dark:text-churchgold-400" />
+                  <span className="font-bold text-xs text-slate-800 dark:text-stone-100">نطاق النشر المخصص:</span>
+                </div>
+                <span className="px-3 py-1 rounded-xl bg-burgundy-900 text-churchgold-300 text-xs font-black">
+                  {userStage}
                 </span>
               </div>
-
-              <p className="text-[11px] text-slate-500 dark:text-stone-400">
-                اختر المراحل التي يسمح لخدامها بقراءة وتحميل هذا الكتاب. اختيار "عامة" يجعله ظاهراً لخدام العامة.
-              </p>
-
-              <div className="flex flex-wrap gap-2 pt-1">
-                {availableStages.map(stg => {
-                  const isSelected = selectedStages.includes(stg);
-                  return (
-                    <button
-                      key={stg}
-                      type="button"
-                      onClick={() => handleToggleStage(stg)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
-                        isSelected
-                          ? 'bg-churchgold-600 text-burgundy-950 border-churchgold-500 shadow-xs font-black'
-                          : 'bg-white dark:bg-[#1a0a12] text-slate-600 dark:text-stone-300 border-amber-200/80 dark:border-[#4d1d2c] hover:bg-amber-50'
-                      }`}
-                    >
-                      {isSelected && <Check className="w-3.5 h-3.5 text-burgundy-950" />}
-                      <span>{stg}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="flex items-center gap-2 pt-1 text-[10px]">
-                <button
-                  type="button"
-                  onClick={handleSelectAllStages}
-                  className="px-2.5 py-1 rounded-lg bg-stone-200 dark:bg-[#341121] text-slate-700 dark:text-stone-200 font-bold hover:bg-stone-300 cursor-pointer"
-                >
-                  اختيار كل المراحل
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSelectGeneralOnly}
-                  className="px-2.5 py-1 rounded-lg bg-stone-200 dark:bg-[#341121] text-slate-700 dark:text-stone-200 font-bold hover:bg-stone-300 cursor-pointer"
-                >
-                  عامة فقط
-                </button>
-              </div>
-            </div>
+            )}
 
             {fileError && (
               <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50 text-xs font-bold flex items-center justify-between">

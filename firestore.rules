@@ -118,7 +118,13 @@ service cloud.firestore {
         data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
         data.category is string && data.category.size() >= 1 && data.category.size() <= 50 &&
         data.targetGrade is string && data.targetGrade.size() >= 1 && data.targetGrade.size() <= 100 &&
-        (!('fileUrl' in data) || (data.fileUrl is string && data.fileUrl.size() <= 2000)) &&
+        (!('fileUrl' in data) || (data.fileUrl is string && data.fileUrl.size() <= 980000)) &&
+        (!('pdfUrl' in data) || (data.pdfUrl is string && data.pdfUrl.size() <= 980000)) &&
+        (!('coverImage' in data) || (data.coverImage is string && data.coverImage.size() <= 250000)) &&
+        (!('author' in data) || (data.author is string && data.author.size() <= 120)) &&
+        (!('year' in data) || (data.year is string && data.year.size() <= 20)) &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 1500)) &&
+        (!('contentSummary' in data) || (data.contentSummary is string && data.contentSummary.size() <= 4000)) &&
         (!('visibility' in data) || (data.visibility is string && data.visibility in ['all', 'specific_stages'])) &&
         (!('targetStages' in data) || (data.targetStages is list && data.targetStages.size() <= 30));
     }
@@ -128,7 +134,8 @@ service cloud.firestore {
         data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
         data.body is string && data.body.size() >= 1 && data.body.size() <= 2000 &&
         (!('targetScope' in data) || (data.targetScope is string && data.targetScope in ['all', 'general_dock', 'specific_stages'])) &&
-        (!('targetStages' in data) || (data.targetStages is list && data.targetStages.size() <= 30));
+        (!('targetStages' in data) || (data.targetStages is list && data.targetStages.size() <= 30)) &&
+        (!('type' in data) || (data.type is string && data.type in ['event', 'alert', 'spiritual', 'meeting']));
     }
 
     function isValidStage(data) {
@@ -191,9 +198,10 @@ service cloud.firestore {
         existing().get('isProtectedRoot', false) != true;
     }
 
-    // Isolated Pending Registrations Queue (New sign-up requests only; review strictly by amin_khedma_am)
+    // Isolated Pending Registrations Queue (Anonymous auth create only; review strictly by amin_khedma_am)
     match /pending_registrations/{regId} {
       allow create: if isValidId(regId) &&
+        request.auth != null &&
         isValidPendingRegistration(incoming()) &&
         incoming().status == 'pending';
       allow get: if isValidId(regId) && isAminKhedmaAm();
@@ -223,22 +231,67 @@ service cloud.firestore {
       allow delete: if isValidId(attendanceId) && isAminKhedmaAm();
     }
 
-    // Library collection
+    // Library collection (General books restricted to amin_khedma_am; stage books editable by stage leaders)
     match /library/{bookId} {
       allow get: if isValidId(bookId) && isAuthenticated();
       allow list: if isAuthenticated() && resource.data.title is string;
-      allow create: if isValidId(bookId) && isAuthenticated() && isValidLibraryBook(incoming());
-      allow update: if isValidId(bookId) && isAuthenticated() && isValidLibraryBook(incoming()) && immutableAuditFields();
-      allow delete: if isValidId(bookId) && isAminKhedmaAm();
+      allow create: if isValidId(bookId) &&
+        isAminFaslOrAbove() &&
+        isValidLibraryBook(incoming()) &&
+        (
+          isAminKhedmaAm() ||
+          (incoming().get('visibility', 'specific_stages') == 'specific_stages' &&
+            incoming().targetGrade != 'عامة')
+        );
+      allow update: if isValidId(bookId) &&
+        isAminFaslOrAbove() &&
+        isValidLibraryBook(incoming()) &&
+        immutableAuditFields() &&
+        (
+          isAminKhedmaAm() ||
+          (incoming().get('visibility', 'specific_stages') == 'specific_stages' &&
+            incoming().targetGrade != 'عامة')
+        );
+      allow delete: if isValidId(bookId) &&
+        (
+          isAminKhedmaAm() ||
+          (isAminFaslOrAbove() &&
+            existing().get('visibility', 'specific_stages') != 'all' &&
+            existing().targetGrade != 'عامة')
+        );
     }
 
-    // Announcements collection
+    // Announcements collection (General/general_dock restricted to amin_khedma_am; stage-specific allowed for stage leaders)
     match /announcements/{announcementId} {
       allow get: if isValidId(announcementId) && isAuthenticated();
       allow list: if isAuthenticated() && resource.data.title is string;
-      allow create: if isValidId(announcementId) && isAuthenticated() && isValidAnnouncement(incoming());
-      allow update: if isValidId(announcementId) && isAuthenticated() && isValidAnnouncement(incoming()) && immutableAuditFields();
-      allow delete: if isValidId(announcementId) && isAminFaslOrAbove();
+      allow create: if isValidId(announcementId) &&
+        isAminFaslOrAbove() &&
+        isValidAnnouncement(incoming()) &&
+        (
+          isAminKhedmaAm() ||
+          (incoming().get('targetScope', 'specific_stages') == 'specific_stages' &&
+            incoming().get('targetRole', '') != 'all' &&
+            incoming().get('targetRole', '') != 'عامة')
+        );
+      allow update: if isValidId(announcementId) &&
+        isAminFaslOrAbove() &&
+        isValidAnnouncement(incoming()) &&
+        immutableAuditFields() &&
+        (
+          isAminKhedmaAm() ||
+          (incoming().get('targetScope', 'specific_stages') == 'specific_stages' &&
+            incoming().get('targetRole', '') != 'all' &&
+            incoming().get('targetRole', '') != 'عامة')
+        );
+      allow delete: if isValidId(announcementId) &&
+        (
+          isAminKhedmaAm() ||
+          (isAminFaslOrAbove() &&
+            existing().get('targetScope', 'specific_stages') == 'specific_stages' &&
+            existing().get('targetRole', '') != 'all' &&
+            existing().get('targetRole', '') != 'عامة')
+        );
     }
 
     // Stages collection

@@ -28,7 +28,7 @@ export const PersonDetailsModal: React.FC<PersonDetailsModalProps> = ({
   onDelete,
   onViewAttendanceHistory
 }) => {
-  const { attendance } = useApp();
+  const { attendance, currentUser } = useApp();
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
 
   if (!isOpen || !person) return null;
@@ -36,6 +36,7 @@ export const PersonDetailsModal: React.FC<PersonDetailsModalProps> = ({
   const isChild = type === 'child';
   const isServant = type === 'servant';
   const isSupervisor = type === 'supervisor';
+  const canEditDelete = !(isChild && currentUser?.isAdminAssistant && currentUser?.canAssignMakhdomeen === false);
 
   const child = isChild ? (person as Child) : null;
   const servant = isServant ? (person as Servant) : null;
@@ -450,16 +451,18 @@ export const PersonDetailsModal: React.FC<PersonDetailsModalProps> = ({
         {/* Footer Actions */}
         <div className="p-3.5 sm:p-4 bg-stone-50 dark:bg-[#200a14] border-t border-amber-200/80 dark:border-[#381622] flex items-center justify-between gap-2 shrink-0">
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                onClose();
-                onEdit(person);
-              }}
-              className="inline-flex items-center gap-1 px-3.5 py-2 rounded-xl bg-burgundy-900 hover:bg-burgundy-950 text-churchgold-100 text-xs font-bold shadow-xs transition-colors cursor-pointer"
-            >
-              <Edit3 className="w-3.5 h-3.5 text-churchgold-300" />
-              <span>تعديل البيانات</span>
-            </button>
+            {canEditDelete && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onEdit(person);
+                }}
+                className="inline-flex items-center gap-1 px-3.5 py-2 rounded-xl bg-burgundy-900 hover:bg-burgundy-950 text-churchgold-100 text-xs font-bold shadow-xs transition-colors cursor-pointer"
+              >
+                <Edit3 className="w-3.5 h-3.5 text-churchgold-300" />
+                <span>تعديل البيانات</span>
+              </button>
+            )}
 
             {onViewAttendanceHistory && (
               <button
@@ -475,33 +478,35 @@ export const PersonDetailsModal: React.FC<PersonDetailsModalProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5">
-            {showDeleteConfirm ? (
-              <div className="flex items-center gap-1.5 bg-rose-50 dark:bg-rose-950/60 p-1.5 rounded-xl border border-rose-300 dark:border-rose-800">
-                <span className="text-xs text-rose-700 dark:text-rose-300 font-bold px-1">تأكيد الحذف؟</span>
+            {canEditDelete && (
+              showDeleteConfirm ? (
+                <div className="flex items-center gap-1.5 bg-rose-50 dark:bg-rose-950/60 p-1.5 rounded-xl border border-rose-300 dark:border-rose-800">
+                  <span className="text-xs text-rose-700 dark:text-rose-300 font-bold px-1">تأكيد الحذف؟</span>
+                  <button
+                    onClick={() => {
+                      onDelete(person.id);
+                      onClose();
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    نعم، احذف
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="px-2.5 py-1 rounded-lg bg-stone-200 dark:bg-stone-800 text-stone-700 dark:text-stone-300 text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    إلغاء
+                  </button>
+                </div>
+              ) : (
                 <button
-                  onClick={() => {
-                    onDelete(person.id);
-                    onClose();
-                  }}
-                  className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-colors cursor-pointer"
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="p-2 rounded-xl text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+                  title="حذف"
                 >
-                  نعم، احذف
+                  <Trash2 className="w-4 h-4" />
                 </button>
-                <button
-                  onClick={() => setShowDeleteConfirm(false)}
-                  className="px-2.5 py-1 rounded-lg bg-stone-200 dark:bg-stone-800 text-stone-700 dark:text-stone-300 text-xs font-bold transition-colors cursor-pointer"
-                >
-                  إلغاء
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowDeleteConfirm(true)}
-                className="p-2 rounded-xl text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
-                title="حذف"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              )
             )}
             <button
               onClick={onClose}

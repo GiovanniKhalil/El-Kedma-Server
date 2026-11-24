@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Role, Stage, AppUser } from '../types';
+import { Role, Stage, AppUser, ClassAssignment, ClassAssignmentRole, PendingRegistration } from '../types';
 import { 
   X, UserPlus, Users, Trash2, ShieldCheck, 
   CheckCircle2, Sparkles, RefreshCw, AlertCircle, Edit3, Crown, Save, ArrowRight,
-  Lock, KeyRound, UserCheck, Check, Database, Wifi, Server
+  Lock, KeyRound, UserCheck, Check, Database, Wifi, Server, Clock, Plus
 } from 'lucide-react';
 import { getStageBadgeClass } from '../utils/themeColors';
 import { validateUsername, verifyPassword } from '../utils/cryptoUtils';
@@ -15,12 +15,33 @@ interface UserManagementModalProps {
   onClose: () => void;
 }
 
-export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen, onClose }) => {
-  const { users, createUser, updateUser, deleteUser, resetUserTempPassword, currentUser, stagesList, clearAllNonAdminUsers } = useApp();
+const ROLE_ARABIC_MAP: Record<string, string> = {
+  amin_khedma_am: 'أمين الخدمة العام',
+  amin_fasl: 'أمين فصل',
+  mosaed_amin: 'مساعد أمين',
+  khadem: 'خادم',
+  general_dock: 'خادم عام (خدمة عامة)'
+};
 
-  const [activeSubTab, setActiveSubTab] = useState<'list' | 'add' | 'edit'>('list');
+export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen, onClose }) => {
+  const {
+    users,
+    pendingRegistrations,
+    approvePendingRegistration,
+    rejectPendingRegistration,
+    createUser,
+    updateUser,
+    deleteUser,
+    resetUserTempPassword,
+    currentUser,
+    stagesList,
+    clearAllNonAdminUsers
+  } = useApp();
+
+  const [activeSubTab, setActiveSubTab] = useState<'list' | 'pending' | 'add' | 'edit'>('list');
   const [showPurgeModal, setShowPurgeModal] = useState(false);
   const [isPurging, setIsPurging] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [cloudSyncStatus, setCloudSyncStatus] = useState<{
     tested: boolean;
     loading: boolean;
@@ -32,28 +53,71 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
     loading: false
   });
 
+  const defaultStage = stagesList[0]?.name || 'ابتدائي (ثالثة ورابعة)';
+  const defaultStageId = stagesList[0]?.id || defaultStage;
+
   // Editing User State
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
-  const [editFormData, setEditFormData] = useState({
+  const [editFormData, setEditFormData] = useState<{
+    name: string;
+    username: string;
+    role: Role;
+    assignedStage: Stage;
+    assignments: ClassAssignment[];
+    phone: string;
+    password: string;
+    isAdminAssistant: boolean;
+    canAssignMakhdomeen: boolean;
+  }>({
     name: '',
     username: '',
-    role: 'khadem' as Role,
-    assignedStage: 'عامة' as Stage,
+    role: 'khadem',
+    assignedStage: 'عامة',
+    assignments: [],
     phone: '',
-    password: ''
+    password: '',
+    isAdminAssistant: false,
+    canAssignMakhdomeen: true
   });
 
   // New User Form State
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    name: string;
+    username: string;
+    tempPassword: string;
+    role: Role;
+    assignedStage: Stage;
+    assignments: ClassAssignment[];
+    phone: string;
+    isAdminAssistant: boolean;
+    canAssignMakhdomeen: boolean;
+  }>({
     name: '',
     username: '',
     tempPassword: 'temp' + Math.floor(1000 + Math.random() * 9000),
-    role: 'khadem' as Role,
-    assignedStage: 'ابتدائي (ثالثة ورابعة)' as Stage,
-    phone: ''
+    role: 'khadem',
+    assignedStage: defaultStage,
+    assignments: [{ stageId: defaultStageId, stageName: defaultStage, role: 'khadem' }],
+    phone: '',
+    isAdminAssistant: false,
+    canAssignMakhdomeen: true
   });
 
+  // Pending Registration review config per request ID
+  const [pendingConfig, setPendingConfig] = useState<
+    Record<
+      string,
+      {
+        tempPassword: string;
+        role: Role;
+        assignments: ClassAssignment[];
+        loading?: boolean;
+      }
+    >
+  >({});
+
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
+  const [actionErrorMsg, setActionErrorMsg] = useState<string | null>(null);
 
   // Security Verification Gate state
   const [showAuthGate, setShowAuthGate] = useState(false);
@@ -70,8 +134,8 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
 
   if (!isOpen) return null;
 
-  // Check authorization: General Secretary only
-  const isAuthorizedAdmin = currentUser?.role === 'amin_khedma_am';
+  // Check authorization: General Secretary or Admin Assistant
+  const isAuthorizedAdmin = currentUser?.role === 'amin_khedma_am' || Boolean(currentUser?.isAdminAssistant);
 
   if (!isAuthorizedAdmin) {
     return (
@@ -86,15 +150,60 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
     );
   }
 
+  const pendingOnly = pendingRegistrations.filter(r => r.status === 'pending');
+
+  const resolveAssignmentRowRole = (r: Role): ClassAssignmentRole => {
+    if (r === 'amin_fasl' || r === 'mosaed_amin' || r === 'khadem') return r;
+    return 'khadem';
+  };
+
+  const getHighestAssignmentRole = (list: ClassAssignment[], fallback: Role): Role => {
+    if (fallback === 'amin_khedma_am' || fallback === 'general_dock') return fallback;
+    if (list.some(a => a.role === 'amin_fasl')) return 'amin_fasl';
+    if (list.some(a => a.role === 'mosaed_amin')) return 'mosaed_amin';
+    if (list.length > 0) return 'khadem';
+    return fallback;
+  };
+
   const startEditing = (u: AppUser) => {
+    setActionErrorMsg(null);
+    setActionSuccessMsg(null);
     setEditingUser(u);
+
+    const initialAssignments: ClassAssignment[] =
+      u.assignments && u.assignments.length > 0
+        ? u.assignments.map(a => ({ ...a }))
+        : u.role !== 'amin_khedma_am' &&
+          u.role !== 'general_dock' &&
+          u.assignedStage &&
+          u.assignedStage !== 'عامة' &&
+          u.assignedStage !== 'في انتظار التعيين'
+        ? [
+            u.assignedStage,
+            ...(u.assignedStages || [])
+          ]
+            .filter(Boolean)
+            .filter((val, idx, arr) => arr.indexOf(val) === idx)
+            .map((stgName, idx) => {
+              const found = stagesList.find(s => s.name === stgName || s.id === stgName);
+              return {
+                stageId: found?.id || stgName,
+                stageName: found?.name || stgName,
+                role: idx === 0 ? resolveAssignmentRowRole(u.role) : 'khadem'
+              };
+            })
+        : [];
+
     setEditFormData({
       name: u.name,
       username: u.username,
       role: u.role,
       assignedStage: (u.assignedStage || 'عامة') as Stage,
+      assignments: initialAssignments,
       phone: u.phone || '',
-      password: ''
+      password: '',
+      isAdminAssistant: Boolean(u.isAdminAssistant),
+      canAssignMakhdomeen: u.canAssignMakhdomeen !== undefined ? Boolean(u.canAssignMakhdomeen) : true
     });
     setActiveSubTab('edit');
   };
@@ -164,33 +273,49 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
     }
   };
 
-  const handleEditSubmit = (e: React.FormEvent) => {
+  const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
+    setActionErrorMsg(null);
+    setActionSuccessMsg(null);
     if (!editFormData.name.trim() || !editFormData.username.trim()) return;
 
     // Validate username strictly per requirements
     const usernameVal = validateUsername(editFormData.username.trim(), users, editingUser.id);
     if (!usernameVal.valid) {
-      setActionSuccessMsg(`❌ ${usernameVal.error}`);
-      setTimeout(() => setActionSuccessMsg(null), 6000);
+      setActionErrorMsg(usernameVal.error || 'اسم المستخدم غير صالح');
       return;
     }
 
     // Protect General Secretary role: cannot assign another user as amin_khedma_am, and cannot demote the General Secretary
     if (editingUser.role !== 'amin_khedma_am' && editFormData.role === 'amin_khedma_am') {
-      setActionSuccessMsg('❌ حساب أمين الخدمة العام ثابت ولا يمكن تعيين حساب آخر كأمين عام.');
-      setTimeout(() => setActionSuccessMsg(null), 5000);
+      setActionErrorMsg('حساب أمين الخدمة العام ثابت ولا يمكن تعيين حساب آخر كأمين عام.');
       return;
     }
-    const finalRole: Role = editingUser.role === 'amin_khedma_am' ? 'amin_khedma_am' : editFormData.role;
+    const baseRole: Role = editingUser.role === 'amin_khedma_am' ? 'amin_khedma_am' : editFormData.role;
+    const cleanAssignments =
+      baseRole === 'amin_khedma_am' || baseRole === 'general_dock' ? [] : editFormData.assignments;
+    const finalRole = getHighestAssignmentRole(cleanAssignments, baseRole);
+    const primaryStage: Stage =
+      finalRole === 'amin_khedma_am' || finalRole === 'general_dock'
+        ? 'عامة'
+        : cleanAssignments[0]?.stageName || editFormData.assignedStage || 'في انتظار التعيين';
 
     const updatePayload: Partial<AppUser> = {
       name: editFormData.name.trim(),
       username: editFormData.username.trim(),
       role: finalRole,
-      assignedStage: editFormData.assignedStage,
-      phone: editFormData.phone.trim()
+      assignedStage: primaryStage,
+      assignedStages: cleanAssignments.slice(1).map(a => a.stageName),
+      assignments: cleanAssignments,
+      phone: editFormData.phone.trim(),
+      isAdminAssistant: editingUser.role === 'amin_khedma_am' ? false : editFormData.isAdminAssistant,
+      canAssignMakhdomeen:
+        editingUser.role === 'amin_khedma_am'
+          ? true
+          : editFormData.isAdminAssistant
+          ? editFormData.canAssignMakhdomeen
+          : true
     };
 
     if (editFormData.password.trim()) {
@@ -198,12 +323,23 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
       updatePayload.isTempPassword = false;
     }
 
-    const executeSave = () => {
-      updateUser(editingUser.id, updatePayload);
-      setActionSuccessMsg(`✅ تم تحديث وتعديل بيانات حساب (${editFormData.name}) بنجاح!`);
-      setTimeout(() => setActionSuccessMsg(null), 6000);
-      setActiveSubTab('list');
-      setEditingUser(null);
+    const executeSave = async () => {
+      setIsSubmitting(true);
+      try {
+        const res = await updateUser(editingUser.id, updatePayload);
+        if (!res.success) {
+          setActionErrorMsg(res.error || 'تعذر تحديث بيانات الحساب.');
+          return;
+        }
+        setActionSuccessMsg(`✅ تم تحديث وتعديل بيانات حساب (${editFormData.name}) بنجاح!`);
+        setTimeout(() => setActionSuccessMsg(null), 6000);
+        setActiveSubTab('list');
+        setEditingUser(null);
+      } catch (err: any) {
+        setActionErrorMsg(err?.message || 'حدث خطأ أثناء حفظ التعديلات.');
+      } finally {
+        setIsSubmitting(false);
+      }
     };
 
     // Rule: Modifying General Secretary or assigning someone as General Secretary requires credentials confirmation
@@ -218,43 +354,269 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
       return;
     }
 
-    executeSave();
+    await executeSave();
   };
 
-  const handleCreateSubmit = (e: React.FormEvent) => {
+  const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setActionErrorMsg(null);
+    setActionSuccessMsg(null);
     if (!formData.name.trim() || !formData.username.trim() || !formData.tempPassword.trim()) return;
 
     // Validate username strictly per requirements
     const usernameVal = validateUsername(formData.username.trim(), users);
     if (!usernameVal.valid) {
-      setActionSuccessMsg(`❌ ${usernameVal.error}`);
-      setTimeout(() => setActionSuccessMsg(null), 6000);
+      setActionErrorMsg(usernameVal.error || 'اسم المستخدم غير صالح');
       return;
     }
 
-    createUser({
-      name: formData.name,
-      username: formData.username.trim(),
-      password: formData.tempPassword,
-      role: formData.role,
-      assignedStage: formData.assignedStage,
-      phone: formData.phone
-    });
+    if (formData.role === 'amin_khedma_am') {
+      setActionErrorMsg('حساب أمين الخدمة العام ثابت ولا يمكن إنشاء حساب آخر بنفس الصفة.');
+      return;
+    }
 
-    setActionSuccessMsg(`✅ تم إنشاء حساب جديد لـ (${formData.name}) بنجاح!`);
-    setTimeout(() => setActionSuccessMsg(null), 6000);
+    const cleanAssignments = formData.role === 'general_dock' ? [] : formData.assignments;
+    const derivedRole = getHighestAssignmentRole(cleanAssignments, formData.role);
+    const primaryStage: Stage =
+      derivedRole === 'general_dock'
+        ? 'عامة'
+        : cleanAssignments[0]?.stageName || formData.assignedStage || 'في انتظار التعيين';
 
-    setFormData({
-      name: '',
-      username: '',
+    setIsSubmitting(true);
+    try {
+      const res = await createUser({
+        name: formData.name.trim(),
+        username: formData.username.trim(),
+        password: formData.tempPassword,
+        role: derivedRole,
+        assignedStage: primaryStage,
+        assignedStages: cleanAssignments.slice(1).map(a => a.stageName),
+        assignments: cleanAssignments,
+        phone: formData.phone.trim(),
+        isAdminAssistant: formData.isAdminAssistant,
+        canAssignMakhdomeen: formData.isAdminAssistant ? formData.canAssignMakhdomeen : true
+      });
+
+      if (!res.success) {
+        setActionErrorMsg(res.error || 'فشل إنشاء الحساب.');
+        return;
+      }
+
+      setActionSuccessMsg(`✅ تم إنشاء حساب جديد لـ (${formData.name}) بنجاح!`);
+      setTimeout(() => setActionSuccessMsg(null), 6000);
+
+      setFormData({
+        name: '',
+        username: '',
+        tempPassword: 'temp' + Math.floor(1000 + Math.random() * 9000),
+        role: 'khadem',
+        assignedStage: defaultStage,
+        assignments: [{ stageId: defaultStageId, stageName: defaultStage, role: 'khadem' }],
+        phone: '',
+        isAdminAssistant: false,
+        canAssignMakhdomeen: true
+      });
+
+      setActiveSubTab('list');
+    } catch (err: any) {
+      setActionErrorMsg(err?.message || 'حدث خطأ أثناء إنشاء الحساب.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const getPendingState = (reg: PendingRegistration) => {
+    const existing = pendingConfig[reg.id];
+    if (existing) return existing;
+    return {
       tempPassword: 'temp' + Math.floor(1000 + Math.random() * 9000),
-      role: 'khadem',
-      assignedStage: 'ابتدائي (ثالثة ورابعة)',
-      phone: ''
-    });
+      role: 'khadem' as Role,
+      assignments: defaultStage
+        ? [{ stageId: defaultStageId, stageName: defaultStage, role: 'khadem' as ClassAssignmentRole }]
+        : [],
+      loading: false
+    };
+  };
 
-    setActiveSubTab('list');
+  const updatePendingState = (
+    reg: PendingRegistration,
+    patch: Partial<{ tempPassword: string; role: Role; assignments: ClassAssignment[]; loading: boolean }>
+  ) => {
+    const base = getPendingState(reg);
+    setPendingConfig(prev => ({
+      ...prev,
+      [reg.id]: { ...base, ...patch }
+    }));
+  };
+
+  const handleApprovePending = async (reg: PendingRegistration) => {
+    setActionErrorMsg(null);
+    setActionSuccessMsg(null);
+    const cfg = getPendingState(reg);
+    const cleanAssignments = cfg.role === 'general_dock' ? [] : cfg.assignments;
+    const derivedRole = getHighestAssignmentRole(cleanAssignments, cfg.role);
+    const primaryStage =
+      derivedRole === 'general_dock'
+        ? 'عامة'
+        : cleanAssignments[0]?.stageName || defaultStage;
+
+    updatePendingState(reg, { loading: true });
+    try {
+      const res = await approvePendingRegistration(reg.id, {
+        role: derivedRole,
+        assignedStage: primaryStage,
+        assignments: cleanAssignments,
+        tempPassword: cfg.tempPassword.trim() || undefined
+      });
+      if (!res.success) {
+        setActionErrorMsg(res.error || 'تعذر اعتماد الحساب.');
+        return;
+      }
+      setActionSuccessMsg(`✅ تم اعتماد وتسكين حساب (${reg.fullName}) بنجاح!`);
+      setTimeout(() => setActionSuccessMsg(null), 6000);
+    } catch (err: any) {
+      setActionErrorMsg(err?.message || 'حدث خطأ أثناء اعتماد الطلب.');
+    } finally {
+      updatePendingState(reg, { loading: false });
+    }
+  };
+
+  const handleRejectPending = async (reg: PendingRegistration) => {
+    setActionErrorMsg(null);
+    setActionSuccessMsg(null);
+    updatePendingState(reg, { loading: true });
+    try {
+      await rejectPendingRegistration(reg.id);
+      setActionSuccessMsg(`تم رفض وحذف طلب التسجيل الخاص بـ (${reg.fullName}).`);
+      setTimeout(() => setActionSuccessMsg(null), 5000);
+    } catch (err: any) {
+      setActionErrorMsg(err?.message || 'تعذر رفض الطلب.');
+    } finally {
+      updatePendingState(reg, { loading: false });
+    }
+  };
+
+  const renderAssignmentsEditor = (
+    assignments: ClassAssignment[],
+    onChange: (next: ClassAssignment[]) => void,
+    defaultRowRole: Role
+  ) => {
+    const usedStageNames = new Set(assignments.map(a => a.stageName));
+    const availableToAdd = stagesList.filter(s => !usedStageNames.has(s.name));
+
+    return (
+      <div className="p-3.5 rounded-2xl bg-stone-50 dark:bg-[#220a15] border border-amber-200/80 dark:border-[#4d1d2c] space-y-2.5">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <span className="font-black text-slate-900 dark:text-stone-100 text-xs block">
+              تسكين الفصول والرتب داخل الشجرة (Multi-Class Assignments)
+            </span>
+            <span className="text-[10px] text-slate-500 dark:text-stone-400">
+              يمكن تكليف الخادم في أكثر من فصل برتبة مستقلة لكل فصل (بحد أقصى أمين فصل واحد لكل مرحلة)
+            </span>
+          </div>
+          {availableToAdd.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                const nextStage = availableToAdd[0];
+                onChange([
+                  ...assignments,
+                  {
+                    stageId: nextStage.id || nextStage.name,
+                    stageName: nextStage.name,
+                    role: resolveAssignmentRowRole(defaultRowRole)
+                  }
+                ]);
+              }}
+              className="px-2.5 py-1.5 rounded-xl bg-burgundy-800 hover:bg-burgundy-900 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
+            >
+              <Plus className="w-3.5 h-3.5 text-churchgold-300" />
+              <span>إضافة فصل آخر</span>
+            </button>
+          )}
+        </div>
+
+        {assignments.length === 0 ? (
+          <div className="p-3 rounded-xl bg-white dark:bg-[#1a0812] border border-dashed border-amber-300 dark:border-[#4d1d2c] text-center text-[11px] text-slate-500 dark:text-stone-400">
+            لم يتم إسناد فصول بعد. اضغط "إضافة فصل آخر" لتحديد مرحلة ورتبة الخدمة.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {assignments.map((row, idx) => {
+              const otherUsed = new Set(
+                assignments.filter((_, i) => i !== idx).map(a => a.stageName)
+              );
+              const rowOptions = stagesList.filter(
+                s => s.name === row.stageName || !otherUsed.has(s.name)
+              );
+
+              return (
+                <div
+                  key={`${row.stageName}-${idx}`}
+                  className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center bg-white dark:bg-[#1a0812] p-2.5 rounded-xl border border-amber-200/70 dark:border-[#3e1423]"
+                >
+                  <div className="sm:col-span-6">
+                    <select
+                      value={row.stageName}
+                      onChange={(e) => {
+                        const chosen = stagesList.find(s => s.name === e.target.value);
+                        const next = assignments.map((item, i) =>
+                          i === idx
+                            ? {
+                                ...item,
+                                stageId: chosen?.id || e.target.value,
+                                stageName: chosen?.name || e.target.value
+                              }
+                            : item
+                        );
+                        onChange(next);
+                      }}
+                      className="w-full bg-stone-50 dark:bg-[#240b17] border border-amber-200/80 dark:border-[#4d1d2c] rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 dark:text-stone-100 focus:outline-none"
+                    >
+                      {rowOptions.map(s => (
+                        <option key={s.id || s.name} value={s.name}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-5">
+                    <select
+                      value={row.role}
+                      onChange={(e) => {
+                        const nextRole = e.target.value as ClassAssignmentRole;
+                        const next = assignments.map((item, i) =>
+                          i === idx ? { ...item, role: nextRole } : item
+                        );
+                        onChange(next);
+                      }}
+                      className="w-full bg-stone-50 dark:bg-[#240b17] border border-amber-200/80 dark:border-[#4d1d2c] rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 dark:text-stone-100 focus:outline-none"
+                    >
+                      <option value="khadem">خادم فصل</option>
+                      <option value="mosaed_amin">مساعد أمين مرحلة</option>
+                      <option value="amin_fasl">أمين مرحلة / فصل</option>
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-1 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => onChange(assignments.filter((_, i) => i !== idx))}
+                      className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
+                      title="إزالة الفصل"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
   };
 
   const handleResetTempPass = (userId: string, userName: string) => {
@@ -290,11 +652,12 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
 
         {/* Sub Navigation */}
         <div className="px-6 pt-4 bg-stone-50 dark:bg-[#250d18] border-b border-amber-200/80 dark:border-[#3e1423] flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <button
               onClick={() => {
                 setActiveSubTab('list');
                 setEditingUser(null);
+                setActionErrorMsg(null);
               }}
               className={`pb-2.5 px-3 font-bold text-xs border-b-2 flex items-center gap-1.5 cursor-pointer transition-colors ${
                 activeSubTab === 'list'
@@ -308,8 +671,30 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
 
             <button
               onClick={() => {
+                setActiveSubTab('pending');
+                setEditingUser(null);
+                setActionErrorMsg(null);
+              }}
+              className={`pb-2.5 px-3 font-bold text-xs border-b-2 flex items-center gap-1.5 cursor-pointer transition-colors ${
+                activeSubTab === 'pending'
+                  ? 'border-churchgold-500 text-burgundy-900 dark:text-churchgold-300'
+                  : 'border-transparent text-slate-500 dark:text-stone-400 hover:text-slate-800'
+              }`}
+            >
+              <Clock className="w-4 h-4" />
+              <span>طلبات التسجيل</span>
+              {pendingOnly.length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-burgundy-950 text-[10px] font-black">
+                  {pendingOnly.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => {
                 setActiveSubTab('add');
                 setEditingUser(null);
+                setActionErrorMsg(null);
               }}
               className={`pb-2.5 px-3 font-bold text-xs border-b-2 flex items-center gap-1.5 cursor-pointer transition-colors ${
                 activeSubTab === 'add'
@@ -351,6 +736,22 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
             <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200 text-xs font-bold flex items-center gap-2 animate-in fade-in">
               <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
               <span>{actionSuccessMsg}</span>
+            </div>
+          )}
+
+          {actionErrorMsg && (
+            <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-700 text-rose-800 dark:text-rose-200 text-xs font-bold flex items-center justify-between gap-2 animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{actionErrorMsg}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActionErrorMsg(null)}
+                className="text-rose-500 hover:text-rose-700 font-bold cursor-pointer"
+              >
+                ✕
+              </button>
             </div>
           )}
 
@@ -457,8 +858,13 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                   return (
                     <div key={u.id} className="p-3.5 rounded-2xl bg-white dark:bg-[#240b17] border border-amber-200/80 dark:border-[#3e1423] hover:border-amber-300 dark:hover:border-[#4d1d2c] shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-colors">
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-slate-900 dark:text-stone-100 text-sm">{u.name}</span>
+                          {u.isAdminAssistant && (
+                            <span className="px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800 text-[10px] font-black">
+                              مساعد أمين عام
+                            </span>
+                          )}
                           {u.assignedStage === 'في انتظار التعيين' && (
                             <span className="px-2 py-0.5 rounded-md bg-amber-500 text-burgundy-950 text-[10px] font-black border border-amber-400">
                               ⏳ في انتظار تعيين المرحلة
@@ -475,14 +881,22 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                             </span>
                           )}
                         </div>
-                        <div className="text-slate-500 dark:text-stone-400 text-[11px] mt-0.5 flex flex-wrap items-center gap-2">
+                        <div className="text-slate-500 dark:text-stone-400 text-[11px] mt-0.5 flex flex-wrap items-center gap-1.5">
                           <span>اسم المستخدم: <strong className="text-slate-700 dark:text-stone-300 font-mono">@{u.username}</strong></span>
                           <span>•</span>
-                          <span>الصفة: {u.role === 'amin_khedma_am' ? 'أمين الخدمة العام' : u.role === 'amin_fasl' ? 'أمين فصل' : 'خادم'}</span>
+                          <span>الصفة: {ROLE_ARABIC_MAP[u.role] || 'خادم'}</span>
                           <span>•</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${getStageBadgeClass(u.assignedStage)}`}>
-                            {u.assignedStage}
-                          </span>
+                          {u.assignments && u.assignments.length > 0 ? (
+                            u.assignments.map((a, idx) => (
+                              <span key={`${a.stageName}-${idx}`} className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${getStageBadgeClass(a.stageName)}`}>
+                                {a.stageName} ({ROLE_ARABIC_MAP[a.role] || 'خادم'})
+                              </span>
+                            ))
+                          ) : (
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${getStageBadgeClass(u.assignedStage)}`}>
+                              {u.assignedStage}
+                            </span>
+                          )}
                           {u.phone && <span>• 📞 {u.phone}</span>}
                         </div>
                       </div>
@@ -524,6 +938,99 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                   );
                 })}
               </div>
+            </div>
+          ) : activeSubTab === 'pending' ? (
+            /* Pending Registrations Approval Tab */
+            <div className="space-y-3">
+              {pendingOnly.length === 0 ? (
+                <div className="p-8 text-center rounded-2xl bg-stone-50 dark:bg-[#200a14] border border-amber-200/70 dark:border-[#381622] text-xs font-bold text-slate-500 dark:text-stone-400">
+                  لا توجد طلبات تسجيل معلقة حالياً.
+                </div>
+              ) : (
+                pendingOnly.map(reg => {
+                  const cfg = getPendingState(reg);
+                  return (
+                    <div
+                      key={reg.id}
+                      className="p-4 rounded-2xl bg-white dark:bg-[#240b17] border-2 border-amber-300/80 dark:border-[#4d1d2c] space-y-3 shadow-xs text-xs"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-amber-100 dark:border-[#381622]">
+                        <div>
+                          <div className="font-black text-sm text-slate-900 dark:text-stone-100 flex items-center gap-2">
+                            <span>{reg.fullName}</span>
+                            <span className="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-[#341121] text-amber-800 dark:text-churchgold-300 text-[10px] font-black">
+                              بانتظار الاعتماد
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-stone-400 mt-0.5 flex flex-wrap items-center gap-2">
+                            <span className="font-mono font-bold">@{reg.username}</span>
+                            <span>• 📞 {reg.phone}</span>
+                            {reg.birthDate && <span>• 🎂 {reg.birthDate}</span>}
+                          </div>
+                          {reg.notes && (
+                            <div className="text-[11px] text-slate-600 dark:text-stone-300 mt-1">
+                              ملاحظات: {reg.notes}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block font-bold mb-1 text-slate-800 dark:text-stone-200">كلمة السر المؤقتة للدخول الأول *</label>
+                          <input
+                            type="text"
+                            value={cfg.tempPassword}
+                            onChange={(e) => updatePendingState(reg, { tempPassword: e.target.value })}
+                            className="w-full bg-amber-50/80 dark:bg-[#341121] border border-amber-300 dark:border-[#4d1d2c] text-amber-900 dark:text-churchgold-300 font-mono font-bold rounded-xl px-3 py-2 text-xs focus:outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-bold mb-1 text-slate-800 dark:text-stone-200">نوع الحساب بالمنظومة</label>
+                          <select
+                            value={cfg.role}
+                            onChange={(e) => updatePendingState(reg, { role: e.target.value as Role })}
+                            className="w-full bg-stone-50 dark:bg-[#200a14] border border-amber-200/80 dark:border-[#4d1d2c] rounded-xl px-3 py-2 font-bold text-slate-800 dark:text-stone-100 focus:outline-none"
+                          >
+                            <option value="khadem">خادم فصل</option>
+                            <option value="mosaed_amin">مساعد أمين مرحلة</option>
+                            <option value="amin_fasl">أمين مرحلة / فصل</option>
+                            <option value="general_dock">خادم عام (خدمة عامة بدون فصل)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {cfg.role !== 'general_dock' &&
+                        renderAssignmentsEditor(
+                          cfg.assignments,
+                          (next) => updatePendingState(reg, { assignments: next }),
+                          cfg.role
+                        )}
+
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-amber-100 dark:border-[#381622]">
+                        <button
+                          type="button"
+                          disabled={cfg.loading}
+                          onClick={() => handleRejectPending(reg)}
+                          className="px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 font-bold text-xs cursor-pointer disabled:opacity-50"
+                        >
+                          رفض الطلب
+                        </button>
+                        <button
+                          type="button"
+                          disabled={cfg.loading}
+                          onClick={() => handleApprovePending(reg)}
+                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>{cfg.loading ? 'جاري الاعتماد...' : 'اعتماد وتسكين الحساب'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           ) : activeSubTab === 'edit' && editingUser ? (
             /* Edit User Form */
@@ -574,7 +1081,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold mb-1 text-slate-800 dark:text-stone-200">رقم الهاتف / الواتساب</label>
                   <input
@@ -599,27 +1106,53 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                       <option value="amin_khedma_am">أمين الخدمة العام (ثابت)</option>
                     ) : (
                       <>
-                        <option value="amin_fasl">أمين فصل / مساعدة</option>
+                        <option value="amin_fasl">أمين مرحلة / فصل</option>
+                        <option value="mosaed_amin">مساعد أمين مرحلة</option>
                         <option value="khadem">خادم</option>
+                        <option value="general_dock">خادم عام (خدمة عامة)</option>
                       </>
                     )}
                   </select>
                 </div>
-
-                <div>
-                  <label className="block font-bold mb-1 text-slate-800 dark:text-stone-200">المرحلة المسئول عنها</label>
-                  <select
-                    value={editFormData.assignedStage}
-                    onChange={(e) => setEditFormData({ ...editFormData, assignedStage: e.target.value as Stage })}
-                    className="w-full bg-stone-50 dark:bg-[#240b17] border border-amber-200/80 dark:border-[#4d1d2c] rounded-xl px-3 py-2 font-bold text-slate-800 dark:text-stone-100 focus:outline-none"
-                  >
-                    <option value="في انتظار التعيين">⏳ في انتظار التعيين (جديد)</option>
-                    {stagesList.map(s => (
-                      <option key={s.id || s.name} value={s.name}>{s.name}</option>
-                    ))}
-                  </select>
-                </div>
               </div>
+
+              {editingUser.role !== 'amin_khedma_am' && editFormData.role !== 'general_dock' && (
+                renderAssignmentsEditor(
+                  editFormData.assignments,
+                  (next) =>
+                    setEditFormData(prev => ({
+                      ...prev,
+                      assignments: next,
+                      assignedStage: next[0]?.stageName || prev.assignedStage
+                    })),
+                  editFormData.role
+                )
+              )}
+
+              {editingUser.role !== 'amin_khedma_am' && (
+                <div className="p-3.5 rounded-2xl bg-purple-50/60 dark:bg-[#240b17] border border-purple-200 dark:border-[#4d1d2c] space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-900 dark:text-stone-100">
+                    <input
+                      type="checkbox"
+                      checked={editFormData.isAdminAssistant}
+                      onChange={(e) => setEditFormData({ ...editFormData, isAdminAssistant: e.target.checked })}
+                      className="rounded border-purple-300"
+                    />
+                    <span>منح صلاحيات مساعد أمين الخدمة العام (Admin Assistant)</span>
+                  </label>
+                  {editFormData.isAdminAssistant && (
+                    <label className="flex items-center gap-2 cursor-pointer text-[11px] font-bold text-slate-700 dark:text-stone-300 pr-5">
+                      <input
+                        type="checkbox"
+                        checked={editFormData.canAssignMakhdomeen}
+                        onChange={(e) => setEditFormData({ ...editFormData, canAssignMakhdomeen: e.target.checked })}
+                        className="rounded border-purple-300"
+                      />
+                      <span>السماح بإضافة وتعديل ونقل بيانات المخدومين</span>
+                    </label>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="block font-bold mb-1 text-slate-800 dark:text-stone-200">
@@ -647,10 +1180,11 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-burgundy-900 to-burgundy-800 hover:from-burgundy-950 hover:to-burgundy-900 text-churchgold-100 font-black flex items-center gap-1.5 shadow-md cursor-pointer border border-churchgold-400/40"
+                  disabled={isSubmitting}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-burgundy-900 to-burgundy-800 hover:from-burgundy-950 hover:to-burgundy-900 text-churchgold-100 font-black flex items-center gap-1.5 shadow-md cursor-pointer border border-churchgold-400/40 disabled:opacity-50"
                 >
                   <Save className="w-4 h-4 text-churchgold-300" />
-                  <span>حفظ التعديلات</span>
+                  <span>{isSubmitting ? 'جاري الحفظ...' : 'حفظ التعديلات'}</span>
                 </button>
               </div>
             </form>
@@ -703,35 +1237,58 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                     className="w-full bg-stone-50 dark:bg-[#240b17] border border-amber-200/80 dark:border-[#4d1d2c] rounded-xl px-3 py-2 font-bold text-slate-800 dark:text-stone-100 focus:outline-none"
                   >
                     <option value="khadem">خادم</option>
-                    <option value="amin_fasl">أمين فصل / مساعدة</option>
-                    <option value="amin_khedma_am">أمين الخدمة العام</option>
+                    <option value="mosaed_amin">مساعد أمين مرحلة</option>
+                    <option value="amin_fasl">أمين مرحلة / فصل</option>
+                    <option value="general_dock">خادم عام (خدمة عامة)</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1 text-slate-800 dark:text-stone-200">المرحلة المسئول عنها</label>
-                  <select
-                    value={formData.assignedStage}
-                    onChange={(e) => setFormData({ ...formData, assignedStage: e.target.value as Stage })}
-                    className="w-full bg-stone-50 dark:bg-[#240b17] border border-amber-200/80 dark:border-[#4d1d2c] rounded-xl px-3 py-2 font-bold text-slate-800 dark:text-stone-100 focus:outline-none"
-                  >
-                    {stagesList.map(s => (
-                      <option key={s.id || s.name} value={s.name}>{s.name}</option>
-                    ))}
-                  </select>
+                  <label className="block font-bold mb-1 text-slate-800 dark:text-stone-200">رقم الهاتف / الواتساب</label>
+                  <input
+                    type="tel"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    placeholder="012XXXXXXXX"
+                    className="w-full bg-stone-50 dark:bg-[#240b17] border border-amber-200/80 dark:border-[#4d1d2c] rounded-xl px-3 py-2 text-slate-900 dark:text-stone-100 focus:outline-none"
+                    dir="ltr"
+                  />
                 </div>
               </div>
 
-              <div>
-                <label className="block font-bold mb-1 text-slate-800 dark:text-stone-200">رقم الهاتف / الواتساب</label>
-                <input
-                  type="tel"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  placeholder="012XXXXXXXX"
-                  className="w-full bg-stone-50 dark:bg-[#240b17] border border-amber-200/80 dark:border-[#4d1d2c] rounded-xl px-3 py-2 text-slate-900 dark:text-stone-100 focus:outline-none"
-                  dir="ltr"
-                />
+              {formData.role !== 'general_dock' &&
+                renderAssignmentsEditor(
+                  formData.assignments,
+                  (next) =>
+                    setFormData(prev => ({
+                      ...prev,
+                      assignments: next,
+                      assignedStage: next[0]?.stageName || prev.assignedStage
+                    })),
+                  formData.role
+                )}
+
+              <div className="p-3.5 rounded-2xl bg-purple-50/60 dark:bg-[#240b17] border border-purple-200 dark:border-[#4d1d2c] space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-900 dark:text-stone-100">
+                  <input
+                    type="checkbox"
+                    checked={formData.isAdminAssistant}
+                    onChange={(e) => setFormData({ ...formData, isAdminAssistant: e.target.checked })}
+                    className="rounded border-purple-300"
+                  />
+                  <span>منح صلاحيات مساعد أمين الخدمة العام (Admin Assistant)</span>
+                </label>
+                {formData.isAdminAssistant && (
+                  <label className="flex items-center gap-2 cursor-pointer text-[11px] font-bold text-slate-700 dark:text-stone-300 pr-5">
+                    <input
+                      type="checkbox"
+                      checked={formData.canAssignMakhdomeen}
+                      onChange={(e) => setFormData({ ...formData, canAssignMakhdomeen: e.target.checked })}
+                      className="rounded border-purple-300"
+                    />
+                    <span>السماح بإضافة وتعديل ونقل بيانات المخدومين</span>
+                  </label>
+                )}
               </div>
 
               <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 rounded-2xl text-emerald-800 dark:text-emerald-200 text-[11px] space-y-1">
@@ -752,10 +1309,11 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-churchgold-600 to-amber-600 hover:from-churchgold-700 hover:to-amber-700 text-burgundy-950 font-black flex items-center gap-1.5 shadow-md cursor-pointer border border-churchgold-400/40"
+                  disabled={isSubmitting}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-churchgold-600 to-amber-600 hover:from-churchgold-700 hover:to-amber-700 text-burgundy-950 font-black flex items-center gap-1.5 shadow-md cursor-pointer border border-churchgold-400/40 disabled:opacity-50"
                 >
                   <UserPlus className="w-4 h-4" />
-                  <span>إنشاء الحساب بكلمة السر المؤقتة</span>
+                  <span>{isSubmitting ? 'جاري الإنشاء...' : 'إنشاء الحساب بكلمة السر المؤقتة'}</span>
                 </button>
               </div>
             </form>

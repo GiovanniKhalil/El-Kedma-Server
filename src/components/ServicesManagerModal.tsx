@@ -56,8 +56,8 @@ export const ServicesManagerModal: React.FC<ServicesManagerModalProps> = ({ isOp
 
   if (!isOpen) return null;
 
-  // Only General Secretary (أمين الخدمة العام) has access to modify services & wipe database
-  if (role !== 'amin_khedma_am') {
+  // Only General Secretary (أمين الخدمة العام) or admin assistants have access to modify services & wipe database
+  if (role !== 'amin_khedma_am' && !currentUser?.isAdminAssistant) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
         <div className="bg-white dark:bg-[#1a0a12] border border-amber-200/80 dark:border-[#3e1423] rounded-3xl max-w-md w-full p-6 text-center space-y-4">
@@ -74,7 +74,7 @@ export const ServicesManagerModal: React.FC<ServicesManagerModalProps> = ({ isOp
     );
   }
 
-  const handleAddService = (e: React.FormEvent) => {
+  const handleAddService = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -90,17 +90,21 @@ export const ServicesManagerModal: React.FC<ServicesManagerModalProps> = ({ isOp
       return;
     }
 
-    addStage(name, newServiceDesc.trim(), newSupervisorName.trim(), newSupervisorPhone.trim());
-    if (newSupervisorServantId) {
-      assignServantRole(newSupervisorServantId, name, 'captain', `أمين مرحلة (${name})`);
+    try {
+      await addStage(name, newServiceDesc.trim(), newSupervisorName.trim(), newSupervisorPhone.trim());
+      if (newSupervisorServantId) {
+        await assignServantRole(newSupervisorServantId, name, 'captain', `أمين مرحلة (${name})`);
+      }
+      setSuccessMsg(`تمت إضافة خدمة "${name}"${newSupervisorServantId ? ' وترقية أمينها' : ''} بنجاح!`);
+      setNewServiceName('');
+      setNewServiceDesc('');
+      setNewSupervisorName('');
+      setNewSupervisorPhone('');
+      setNewSupervisorServantId('');
+      setTimeout(() => setSuccessMsg(null), 3500);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'حدث خطأ أثناء إضافة الخدمة أو تعيين الأمين');
     }
-    setSuccessMsg(`تمت إضافة خدمة "${name}" وترقية أمينها بنجاح!`);
-    setNewServiceName('');
-    setNewServiceDesc('');
-    setNewSupervisorName('');
-    setNewSupervisorPhone('');
-    setNewSupervisorServantId('');
-    setTimeout(() => setSuccessMsg(null), 3500);
   };
 
   const handleUnassignServants = () => {

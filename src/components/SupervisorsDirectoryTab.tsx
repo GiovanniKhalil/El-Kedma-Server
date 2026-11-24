@@ -26,10 +26,11 @@ export const SupervisorsDirectoryTab: React.FC<{
     setStageFilter(selectedStageScope);
   }, [selectedStageScope]);
 
-  const filteredSupervisors = supervisors.filter(sup => {
-    if (sup.is_directory_visible === false) return false;
-    if (sup.title?.includes('أمين الخدمة العام')) return false;
+  const visibleSupervisors = supervisors.filter(
+    sup => sup.is_directory_visible !== false && !sup.title?.includes('أمين الخدمة العام')
+  );
 
+  const filteredSupervisors = visibleSupervisors.filter(sup => {
     const isAssistant = !!(sup.isAssistant || sup.roleType === 'assistant_supervisor');
 
     // Role filter
@@ -48,8 +49,8 @@ export const SupervisorsDirectoryTab: React.FC<{
     return matchesSearch && matchesStage;
   });
 
-  const totalSupervisorsCount = supervisors.filter(s => !s.isAssistant && s.roleType !== 'assistant_supervisor').length;
-  const totalAssistantsCount = supervisors.filter(s => s.isAssistant || s.roleType === 'assistant_supervisor').length;
+  const totalSupervisorsCount = visibleSupervisors.filter(s => !s.isAssistant && s.roleType !== 'assistant_supervisor').length;
+  const totalAssistantsCount = visibleSupervisors.filter(s => s.isAssistant || s.roleType === 'assistant_supervisor').length;
   const currentMonthNum = new Date().getMonth() + 1;
 
   const exportToCSV = () => {
@@ -178,7 +179,7 @@ export const SupervisorsDirectoryTab: React.FC<{
               }`}
             >
               <span>عرض الكل</span>
-              <span className="text-[10px] opacity-75">({supervisors.length})</span>
+              <span className="text-[10px] opacity-75">({visibleSupervisors.length})</span>
             </button>
           </div>
 

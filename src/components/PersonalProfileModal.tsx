@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { 
   X, User, Phone, Briefcase, MapPin, Calendar, 
-  Lock, Check, AlertCircle, ShieldCheck, KeyRound, Sparkles, Anchor
+  Lock, Check, AlertCircle, ShieldCheck, KeyRound, Sparkles, Anchor, Camera, Trash2
 } from 'lucide-react';
 import { AREAS } from '../data/mockData';
+import { compressAvatarImage, isSafeImageUrl } from '../utils/imageHelper';
 
 interface PersonalProfileModalProps {
   isOpen: boolean;
@@ -21,6 +22,7 @@ export const PersonalProfileModal: React.FC<PersonalProfileModalProps> = ({ isOp
   const [phone, setPhone] = useState(currentUser?.phone || '');
   const [birthDate, setBirthDate] = useState(currentUser?.birthDate || '1995-01-01');
   const [notes, setNotes] = useState(currentUser?.notes || '');
+  const [avatarUrl, setAvatarUrl] = useState(currentUser?.avatarUrl || '');
 
   // Password Fields
   const [newPassword, setNewPassword] = useState('');
@@ -30,7 +32,33 @@ export const PersonalProfileModal: React.FC<PersonalProfileModalProps> = ({ isOp
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (isOpen && currentUser) {
+      setName(currentUser.name || '');
+      setPhone(currentUser.phone || '');
+      setBirthDate(currentUser.birthDate || '1995-01-01');
+      setNotes(currentUser.notes || '');
+      setAvatarUrl(currentUser.avatarUrl || '');
+      setErrorMsg(null);
+      setSuccessMsg(null);
+    }
+  }, [isOpen, currentUser]);
+
   if (!isOpen || !currentUser) return null;
+
+  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setErrorMsg(null);
+    try {
+      const compressed = await compressAvatarImage(file);
+      setAvatarUrl(compressed);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'تعذر معالجة الصورة المختارة');
+    } finally {
+      e.target.value = '';
+    }
+  };
 
   const handleInfoSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,7 +76,8 @@ export const PersonalProfileModal: React.FC<PersonalProfileModalProps> = ({ isOp
         name: name.trim(),
         phone: phone.trim(),
         birthDate,
-        notes: notes.trim()
+        notes: notes.trim(),
+        avatarUrl: avatarUrl || ''
       });
       setSuccessMsg('تم حفظ وتحديث بياناتك الشخصية بنجاح!');
       setTimeout(() => {
@@ -95,8 +124,11 @@ export const PersonalProfileModal: React.FC<PersonalProfileModalProps> = ({ isOp
   };
 
   const getRoleArabicTitle = () => {
+    if (currentUser.isAdminAssistant) return 'مساعد أمين الخدمة العام';
     if (currentUser.role === 'amin_khedma_am') return 'أمين الخدمة العام';
     if (currentUser.role === 'amin_fasl') return `أمين مرحلة وفصل (${currentUser.assignedStage})`;
+    if (currentUser.role === 'mosaed_amin') return `مساعد أمين مرحلة (${currentUser.assignedStage})`;
+    if (currentUser.role === 'general_dock') return 'خادم خدمة عامة (عام)';
     return `خادم مرحلة (${currentUser.assignedStage || 'عامة'})`;
   };
 
@@ -107,8 +139,12 @@ export const PersonalProfileModal: React.FC<PersonalProfileModalProps> = ({ isOp
         {/* Modal Header */}
         <div className="bg-gradient-to-r from-burgundy-900 via-burgundy-800 to-[#1e0711] text-white p-4 sm:p-5 flex items-center justify-between border-b border-amber-500/30">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-churchgold-500/20 ring-1 ring-churchgold-400/40 flex items-center justify-center text-churchgold-300 font-bold">
-              <User className="w-5 h-5 text-churchgold-300" />
+            <div className="w-11 h-11 rounded-2xl bg-churchgold-500/20 ring-1 ring-churchgold-400/40 flex items-center justify-center text-churchgold-300 font-bold overflow-hidden shrink-0">
+              {isSafeImageUrl(avatarUrl) ? (
+                <img src={avatarUrl} alt={currentUser.name} className="w-full h-full object-cover" />
+              ) : (
+                <User className="w-5 h-5 text-churchgold-300" />
+              )}
             </div>
             <div>
               <h3 className="font-black text-base sm:text-lg flex items-center gap-2">
@@ -176,6 +212,46 @@ export const PersonalProfileModal: React.FC<PersonalProfileModalProps> = ({ isOp
         {/* Form Body */}
         {activeTab === 'info' ? (
           <form onSubmit={handleInfoSubmit} className="p-4 sm:p-5 space-y-4 text-xs">
+            {/* Avatar Upload & Preview */}
+            <div className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-amber-50/70 dark:bg-[#240b17] border border-amber-200/80 dark:border-[#4d1d2c]">
+              <div className="flex items-center gap-3">
+                <div className="w-14 h-14 rounded-2xl bg-burgundy-900 text-churchgold-300 flex items-center justify-center font-black text-xl overflow-hidden border border-churchgold-400/40 shrink-0">
+                  {isSafeImageUrl(avatarUrl) ? (
+                    <img src={avatarUrl} alt={name || currentUser.name} className="w-full h-full object-cover" />
+                  ) : (
+                    (name || currentUser.name || 'خ').charAt(0)
+                  )}
+                </div>
+                <div>
+                  <div className="text-xs font-black text-slate-900 dark:text-stone-100">الصورة الشخصية</div>
+                  <div className="text-[11px] text-slate-500 dark:text-stone-400">يتم ضغطها تلقائياً لتناسب المزامنة السحابية</div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 shrink-0">
+                <label className="px-3 py-1.5 rounded-xl bg-burgundy-800 hover:bg-burgundy-900 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs">
+                  <Camera className="w-3.5 h-3.5 text-churchgold-300" />
+                  <span>{isSafeImageUrl(avatarUrl) ? 'تغيير' : 'رفع صورة'}</span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    onChange={handleAvatarFileChange}
+                    className="hidden"
+                  />
+                </label>
+                {isSafeImageUrl(avatarUrl) && (
+                  <button
+                    type="button"
+                    onClick={() => setAvatarUrl('')}
+                    className="p-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 text-rose-600 hover:bg-rose-100 border border-rose-200 dark:border-rose-800 cursor-pointer"
+                    title="حذف الصورة"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+
             <div>
               <label className="block text-xs sm:text-sm font-black text-slate-950 dark:text-stone-100 mb-1.5">
                 الاسم الكامل *

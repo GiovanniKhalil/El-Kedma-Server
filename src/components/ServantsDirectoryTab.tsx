@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Servant } from '../types';
+import { Servant, ClassAssignment } from '../types';
 import { MONTHS } from '../data/mockData';
 import { 
-  Search, ShieldCheck, Plus, Briefcase, Phone, MessageCircle, 
-  MapPin, Cake, Edit3, Trash2, Download, Printer, User, BarChart2, Filter, X,
-  UserX, CheckCircle2, KeyRound, Crown, Users, Award, Check,
-  Table, LayoutGrid, Clock
+  Search, ShieldCheck, Plus, Phone, MessageCircle, 
+  Edit3, Trash2, Download, Printer, User, BarChart2, Filter, X,
+  UserX, CheckCircle2, KeyRound, Crown, Users, Check,
+  Clock, AlertCircle
 } from 'lucide-react';
 import { PersonAttendanceModal } from './PersonAttendanceModal';
 import { PersonDetailsModal } from './PersonDetailsModal';
@@ -17,10 +17,16 @@ export const ServantsDirectoryTab: React.FC<{
   onEditServant: (servant: Servant) => void;
 }> = ({ onAddServant, onEditServant }) => {
   const { 
-    servants, updateServant, deleteServant, resetUserTempPassword, selectedStageScope, 
-    role, currentUser, stagesList, unassignAllServantsFromClasses, 
+    servants, deleteServant, selectedStageScope, activeStageName,
+    role, currentUser, stagesList, resetUserTempPassword,
     moveServantsToGeneralDock, assignServantRole 
   } = useApp();
+
+  const isStageLeader = role === 'amin_fasl' || role === 'mosaed_amin';
+  const contextStage =
+    activeStageName !== 'all'
+      ? activeStageName
+      : (currentUser?.assignedStage || selectedStageScope);
 
   const [showPendingOnly, setShowPendingOnly] = useState(false);
   const [viewingAttendanceServant, setViewingAttendanceServant] = useState<Servant | null>(null);
@@ -33,6 +39,7 @@ export const ServantsDirectoryTab: React.FC<{
   const [reassignStage, setReassignStage] = useState<string>('ابتدائي (ثالثة ورابعة)');
   const [reassignAdditionalStages, setReassignAdditionalStages] = useState<string[]>([]);
   const [reassignRoleType, setReassignRoleType] = useState<'captain' | 'first_mate' | 'crew' | 'general_dock'>('crew');
+  const [reassignError, setReassignError] = useState<string | null>(null);
   const [isReassigning, setIsReassigning] = useState(false);
 
   // Bulk Reallocation Modal State
@@ -49,7 +56,7 @@ export const ServantsDirectoryTab: React.FC<{
 
   const [searchQuery, setSearchQuery] = useState('');
   const [stageFilter, setStageFilter] = useState(
-    role === 'amin_khedma_am' ? selectedStageScope : (currentUser?.assignedStage || selectedStageScope)
+    role === 'amin_khedma_am' ? selectedStageScope : contextStage
   );
   const [birthMonthFilter, setBirthMonthFilter] = useState('all');
   const [filterCriterion, setFilterCriterion] = useState<'all' | 'stage' | 'month'>('all');
@@ -58,25 +65,41 @@ export const ServantsDirectoryTab: React.FC<{
     if (role === 'amin_khedma_am') {
       setStageFilter(selectedStageScope);
     } else {
-      setStageFilter(currentUser?.assignedStage || selectedStageScope);
+      setStageFilter(contextStage);
     }
-  }, [selectedStageScope, role, currentUser]);
+  }, [selectedStageScope, role, contextStage]);
 
   // Execute Individual Servant Role Promotion / Reallocation
   const handleConfirmReassign = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reassignModalServant) return;
 
+    setReassignError(null);
     setIsReassigning(true);
     try {
       const targetStage = reassignRoleType === 'general_dock' ? 'عامة' : reassignStage;
-      await assignServantRole(reassignModalServant.id, targetStage, reassignRoleType);
-      
-      // Update servant's assigned multiple stages
-      updateServant(reassignModalServant.id, {
-        assignedStages: reassignRoleType === 'general_dock' ? [] : reassignAdditionalStages
-      });
-      
+      const additionalAssignments: ClassAssignment[] =
+        reassignRoleType === 'general_dock'
+          ? []
+          : reassignAdditionalStages
+              .filter(st => st && st !== targetStage && st !== 'عامة')
+              .map(stName => {
+                const matched = stagesList.find(s => s.name === stName || s.id === stName);
+                return {
+                  stageId: matched?.id || stName,
+                  stageName: matched?.name || stName,
+                  role: 'khadem'
+                };
+              });
+
+      await assignServantRole(
+        reassignModalServant.id,
+        targetStage,
+        reassignRoleType,
+        undefined,
+        additionalAssignments
+      );
+
       const roleName = reassignRoleType === 'captain' 
         ? 'أمين مرحلة وفصل' 
         : reassignRoleType === 'first_mate' 
@@ -88,8 +111,8 @@ export const ServantsDirectoryTab: React.FC<{
       setUnassignSuccessMsg(`تم بنجاح إسناد صفة (${roleName}) وتحديث مراحل خدمة الخادم "${reassignModalServant.name}"!`);
       setTimeout(() => setUnassignSuccessMsg(null), 6000);
       setReassignModalServant(null);
-    } catch (err) {
-      console.warn('Reassign error:', err);
+    } catch (err: any) {
+      setReassignError(err?.message || 'تعذر حفظ التسكين. يرجى مراجعة عدم تكرار أمين الفصل في المرحلة.');
     } finally {
       setIsReassigning(false);
     }
@@ -104,15 +127,18 @@ export const ServantsDirectoryTab: React.FC<{
     setTimeout(() => setUnassignSuccessMsg(null), 7000);
   };
 
-  const filteredServants = servants.filter(servant => {
-    if (servant.is_directory_visible === false) return false;
-    if (servant.roleTitle?.includes('أمين الخدمة العام')) return false;
+  const visibleServants = servants.filter(
+    s => s.is_directory_visible !== false && !s.roleTitle?.includes('أمين الخدمة العام')
+  );
 
-    // 1. أمين المرحلة ومساعد الأمين يرى فقط خدام مرحلته الذين يخدمون معه
-    if (role === 'amin_fasl') {
-      const myStage = currentUser?.assignedStage;
-      const servesWithMe = servant.assignedStage === myStage || 
-        (servant.assignedStages && servant.assignedStages.includes(myStage || ''));
+  const filteredServants = visibleServants.filter(servant => {
+    // 1. أمين المرحلة ومساعد الأمين يرى فقط خدام فصله النشط
+    if (isStageLeader) {
+      const myStage = contextStage;
+      const servesWithMe =
+        servant.assignedStage === myStage ||
+        Boolean(servant.assignedStages && servant.assignedStages.includes(myStage)) ||
+        Boolean(servant.assignments && servant.assignments.some(a => a.stageName === myStage));
       if (!servesWithMe) return false;
     }
 
@@ -128,10 +154,11 @@ export const ServantsDirectoryTab: React.FC<{
       return matchesSearch && isPendingStage;
     }
 
-    const matchesStage = role === 'amin_fasl' ? true : (
+    const matchesStage = isStageLeader ? true : (
       stageFilter === 'all' || 
       servant.assignedStage === stageFilter ||
-      (servant.assignedStages && servant.assignedStages.includes(stageFilter))
+      Boolean(servant.assignedStages && servant.assignedStages.includes(stageFilter)) ||
+      Boolean(servant.assignments && servant.assignments.some(a => a.stageName === stageFilter))
     );
     const matchesMonth = birthMonthFilter === 'all' || servant.birthMonth === Number(birthMonthFilter);
 
@@ -143,9 +170,9 @@ export const ServantsDirectoryTab: React.FC<{
     return matchesSearch && matchesStage && matchesMonth;
   });
 
-  const pendingServantsCount = servants.filter(s => s.assignedStage === 'في انتظار التعيين' || s.assignedStage === 'عامة' || !s.assignedStage).length;
-  const dockCount = servants.filter(s => s.assignedStage === 'عامة' || s.roleType === 'general_dock').length;
-  const assignedCount = servants.length - dockCount;
+  const pendingServantsCount = visibleServants.filter(s => s.assignedStage === 'في انتظار التعيين' || s.assignedStage === 'عامة' || !s.assignedStage).length;
+  const dockCount = visibleServants.filter(s => s.assignedStage === 'عامة' || s.roleType === 'general_dock').length;
+  const assignedCount = visibleServants.length - dockCount;
 
   const exportToCSV = () => {
     const headers = ['اسم الخادم', 'المرحلة الخدمية', 'مراحل إضافية', 'رقم التليفون', 'شهر الميلاد', 'الصفة والدور'];
@@ -266,7 +293,7 @@ export const ServantsDirectoryTab: React.FC<{
               : 'bg-white dark:bg-[#1f0b16] text-slate-700 dark:text-stone-300 hover:bg-amber-50 border border-amber-200/60 dark:border-[#3d1523]'
           }`}
         >
-          كافة الخدام ({servants.length})
+          كافة الخدام ({visibleServants.length})
         </button>
 
         <button
@@ -383,7 +410,7 @@ export const ServantsDirectoryTab: React.FC<{
         {hasActiveFilters && (
           <div className="flex items-center justify-between text-[11px] pt-1 border-t border-amber-100/60 dark:border-[#33111d]">
             <span className="text-slate-500 dark:text-stone-400 font-bold">
-              مطابق: {filteredServants.length} من {servants.length}
+              مطابق: {filteredServants.length} من {visibleServants.length}
             </span>
             <button
               onClick={() => {
@@ -410,9 +437,21 @@ export const ServantsDirectoryTab: React.FC<{
           </div>
         ) : (
           filteredServants.map(servant => {
+            const targetCtxStage = isStageLeader ? contextStage : (stageFilter !== 'all' ? stageFilter : null);
+            const scopedAssignment = targetCtxStage
+              ? servant.assignments?.find(a => a.stageName === targetCtxStage)
+              : undefined;
+
             const isDock = servant.assignedStage === 'عامة' || servant.roleType === 'general_dock';
-            const isCaptain = servant.roleType === 'captain' || (servant.roleTitle && (servant.roleTitle.includes('أمين مرحلة') || servant.roleTitle.includes('أمين فصل')));
-            const isFirstMate = servant.roleType === 'first_mate' || (servant.roleTitle && servant.roleTitle.includes('مساعد'));
+            const isCaptain = scopedAssignment
+              ? scopedAssignment.role === 'amin_fasl'
+              : (servant.roleType === 'captain' || Boolean(servant.roleTitle && (servant.roleTitle.includes('أمين مرحلة') || servant.roleTitle.includes('أمين فصل'))));
+            const isFirstMate = scopedAssignment
+              ? scopedAssignment.role === 'mosaed_amin'
+              : (servant.roleType === 'first_mate' || Boolean(servant.roleTitle && servant.roleTitle.includes('مساعد')));
+            const displayRoleLabel = scopedAssignment
+              ? (scopedAssignment.role === 'amin_fasl' ? 'أمين مرحلة وفصل' : scopedAssignment.role === 'mosaed_amin' ? 'مساعد أمين مرحلة' : 'خادم بالمرحلة')
+              : (servant.roleTitle || (isCaptain ? 'أمين مرحلة' : isFirstMate ? 'أمين مساعد' : isDock ? 'خادم عام' : 'خادم فصل'));
             const hasMultipleStages = servant.assignedStages && servant.assignedStages.length > 0;
 
             return (
@@ -439,7 +478,7 @@ export const ServantsDirectoryTab: React.FC<{
                         {servant.name}
                       </div>
                       <div className="text-xs text-slate-700 dark:text-stone-300 font-bold truncate flex items-center gap-1.5 mt-0.5">
-                        <span>{servant.roleTitle || (isCaptain ? 'أمين مرحلة' : isFirstMate ? 'أمين مساعد' : isDock ? 'خادم عام' : 'خادم فصل')}</span>
+                        <span>{displayRoleLabel}</span>
                       </div>
                     </div>
                   </div>
@@ -449,9 +488,9 @@ export const ServantsDirectoryTab: React.FC<{
                     <span className={`px-2.5 py-1 rounded-lg border text-xs font-black ${
                       isDock 
                         ? 'bg-amber-100 dark:bg-[#351424] text-amber-950 dark:text-churchgold-300 border-amber-300' 
-                        : getStageBadgeClass(servant.assignedStage)
+                        : getStageBadgeClass(targetCtxStage || servant.assignedStage)
                     }`}>
-                      {isDock ? 'خادم عام' : servant.assignedStage}
+                      {isDock ? 'خادم عام' : (targetCtxStage || servant.assignedStage)}
                     </span>
                     {hasMultipleStages && (
                       <div className="flex flex-wrap gap-1 justify-end max-w-[160px]">
@@ -519,6 +558,7 @@ export const ServantsDirectoryTab: React.FC<{
                     {role === 'amin_khedma_am' && (
                       <button
                         onClick={() => {
+                          setReassignError(null);
                           setReassignModalServant(servant);
                           setReassignStage(servant.assignedStage === 'عامة' ? 'ابتدائي (ثالثة ورابعة)' : servant.assignedStage);
                           setReassignRoleType(servant.roleType || (isDock ? 'general_dock' : 'crew'));
@@ -602,6 +642,13 @@ export const ServantsDirectoryTab: React.FC<{
                   المرحلة الأساسية: <strong>{reassignModalServant.assignedStage}</strong> • الصفة: <strong>{reassignModalServant.roleTitle || 'خادم'}</strong>
                 </div>
               </div>
+
+              {reassignError && (
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 rounded-xl flex items-center gap-2 text-xs font-bold">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{reassignError}</span>
+                </div>
+              )}
 
               {/* Step 1: Select Role Type */}
               <div className="space-y-1.5">

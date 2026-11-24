@@ -17,13 +17,14 @@ import { calculateAge } from '../utils/dateUtils';
 export const ChildrenAttendanceTab: React.FC = () => {
   const { 
     children, attendance, markAttendance, markAllAttendance, 
-    getAttendanceRecord, selectedStageScope, role, currentUser, 
+    getAttendanceRecord, selectedStageScope, activeStageName, role, currentUser, 
     stagesList, setActiveTab 
   } = useApp();
   
   const userStages = Array.from(new Set([
     currentUser?.assignedStage,
-    ...(currentUser?.assignedStages || [])
+    ...(currentUser?.assignedStages || []),
+    ...(currentUser?.assignments || []).map(a => a.stageName)
   ].filter(Boolean))) as string[];
 
   const [isAddingNewDay, setIsAddingNewDay] = useState(false);
@@ -32,9 +33,11 @@ export const ChildrenAttendanceTab: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<string>(() => {
     return new Date().toISOString().split('T')[0];
   });
-  const [selectedStage, setSelectedStage] = useState<string>(
-    role === 'amin_khedma_am' ? selectedStageScope : (currentUser?.assignedStage || selectedStageScope)
-  );
+  const [selectedStage, setSelectedStage] = useState<string>(() => {
+    if (role === 'amin_khedma_am') return selectedStageScope;
+    if (activeStageName && activeStageName !== 'all') return activeStageName;
+    return currentUser?.assignedStage || selectedStageScope;
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | AttendanceStatus | 'unrecorded'>('all');
   const [noteInputs, setNoteInputs] = useState<Record<string, string>>({});
@@ -46,13 +49,15 @@ export const ChildrenAttendanceTab: React.FC = () => {
   React.useEffect(() => {
     if (role === 'amin_khedma_am') {
       setSelectedStage(selectedStageScope);
+    } else if (activeStageName && activeStageName !== 'all') {
+      setSelectedStage(activeStageName);
     } else {
       setSelectedStage(prev => {
         if (prev && userStages.includes(prev)) return prev;
         return currentUser?.assignedStage || selectedStageScope;
       });
     }
-  }, [selectedStageScope, role, currentUser]);
+  }, [selectedStageScope, activeStageName, role, currentUser]);
 
   // Extract recorded dates for this event
   const recordedDates: string[] = Array.from(
@@ -239,13 +244,15 @@ export const ChildrenAttendanceTab: React.FC = () => {
             <span>حضور المخدومين (الأولاد)</span>
           </button>
 
-          <button
-            onClick={() => setActiveTab('servants_attendance')}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold text-stone-600 dark:text-stone-300 hover:text-emerald-800 dark:hover:text-churchgold-300 hover:bg-emerald-50 dark:hover:bg-[#11291f] transition-all cursor-pointer"
-          >
-            <CalendarCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            <span>تسجيل حضور الخدام</span>
-          </button>
+          {role !== 'khadem' && role !== 'general_dock' && (
+            <button
+              onClick={() => setActiveTab('servants_attendance')}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold text-stone-600 dark:text-stone-300 hover:text-emerald-800 dark:hover:text-churchgold-300 hover:bg-emerald-50 dark:hover:bg-[#11291f] transition-all cursor-pointer"
+            >
+              <CalendarCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <span>تسجيل حضور الخدام</span>
+            </button>
+          )}
 
           {role === 'amin_khedma_am' && (
             <button
@@ -475,7 +482,7 @@ export const ChildrenAttendanceTab: React.FC = () => {
             ) : (
               <div className="bg-churchgold-100/70 dark:bg-[#2d121f] border border-churchgold-300 dark:border-[#4d1d2c] text-churchgold-950 dark:text-churchgold-300 rounded-xl px-2 py-1 text-xs font-bold flex items-center gap-1">
                 <ShieldCheck className="w-3 h-3 text-churchgold-600" />
-                <span>{currentUser?.assignedStage || selectedStageScope}</span>
+                <span>{activeStageName && activeStageName !== 'all' ? activeStageName : (currentUser?.assignedStage || selectedStageScope)}</span>
               </div>
             )}
 

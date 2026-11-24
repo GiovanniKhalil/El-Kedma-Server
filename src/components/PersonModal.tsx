@@ -14,7 +14,7 @@ interface PersonModalProps {
   onClose: () => void;
   type: PersonType;
   initialData?: Child | Servant | Supervisor | null;
-  onSave: (data: any) => void;
+  onSave: (data: any) => Promise<void> | void;
 }
 
 export const PersonModal: React.FC<PersonModalProps> = ({
@@ -24,7 +24,13 @@ export const PersonModal: React.FC<PersonModalProps> = ({
   initialData,
   onSave
 }) => {
-  const { stagesList, servants } = useApp();
+  const { stagesList, servants, currentUser, role, activeStageName } = useApp();
+
+  const canModifyChildrenStage = !(currentUser?.isAdminAssistant && currentUser?.canAssignMakhdomeen === false);
+  const defaultNonAdminStage =
+    role !== 'amin_khedma_am' && activeStageName && activeStageName !== 'all'
+      ? activeStageName
+      : 'ابتدائي (ثالثة ورابعة)';
 
   const isChild = type === 'child';
   const isServant = type === 'servant';
@@ -69,8 +75,10 @@ export const PersonModal: React.FC<PersonModalProps> = ({
     roleType: 'supervisor' as 'supervisor' | 'assistant_supervisor'
   });
   const [formError, setFormError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
+    setFormError(null);
     if (initialData) {
       const isSupAssistant = !!((initialData as any).isAssistant || (initialData as any).roleType === 'assistant_supervisor');
       setFormData({
@@ -93,9 +101,9 @@ export const PersonModal: React.FC<PersonModalProps> = ({
       setSelectedServantId('');
       setFormData({
         name: '',
-        stage: 'ابتدائي (ثالثة ورابعة)',
-        assignedStage: 'ابتدائي (ثالثة ورابعة)',
-        supervisedStage: 'ابتدائي (ثالثة ورابعة)',
+        stage: defaultNonAdminStage,
+        assignedStage: defaultNonAdminStage,
+        supervisedStage: defaultNonAdminStage,
         secondaryStages: [],
         assignedStages: [],
         age: 9,
@@ -115,7 +123,7 @@ export const PersonModal: React.FC<PersonModalProps> = ({
         roleType: 'supervisor'
       });
     }
-  }, [initialData, isOpen, type]);
+  }, [initialData, isOpen, type, defaultNonAdminStage]);
 
   // Handle picking an existing servant for leadership
   const handleSelectExistingServant = (servantId: string) => {
@@ -171,8 +179,12 @@ export const PersonModal: React.FC<PersonModalProps> = ({
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isChild && !canModifyChildrenStage) {
+      setFormError('صلاحية إضافة أو تعديل أو نقل المخدومين غير مفعلة لهذا الحساب.');
+      return;
+    }
     if (!formData.name.trim()) {
       setFormError('يرجى تحديد أو إدخال اسم الشخص أولاً');
       return;
@@ -188,55 +200,62 @@ export const PersonModal: React.FC<PersonModalProps> = ({
       }
     }
 
-    if (isChild) {
-      onSave({
-        name: formData.name,
-        stage: formData.stage,
-        age: Number(formData.age),
-        birthDate: formData.birthDate,
-        birthMonth: month,
-        phone: formData.phone || '',
-        parentName: formData.parentName,
-        parentPhone: formData.parentPhone,
-        parent2Name: formData.parent2Name || '',
-        parent2Phone: formData.parent2Phone || '',
-        gender: formData.gender,
-        secondaryStages: formData.secondaryStages || [],
-        notes: formData.notes
-      });
-    } else if (isServant) {
-      onSave({
-        name: formData.name,
-        assignedStage: formData.assignedStage,
-        assignedStages: formData.assignedStages || [],
-        phone: formData.phone,
-        birthDate: formData.birthDate,
-        birthMonth: month,
-        roleTitle: formData.roleTitle,
-        notes: formData.notes
-      });
-    } else {
-      // Supervisor / Leadership appointment
-      const isAssistant = formData.isAssistant || formData.roleType === 'assistant_supervisor';
-      const stage = formData.supervisedStage || formData.assignedStage || 'عامة';
-      const leadershipTitle = isAssistant ? `مساعد أمين مرحلة (${stage})` : `أمين مرحلة (${stage})`;
+    setIsSubmitting(true);
+    try {
+      if (isChild) {
+        await onSave({
+          name: formData.name,
+          stage: formData.stage,
+          age: Number(formData.age),
+          birthDate: formData.birthDate,
+          birthMonth: month,
+          phone: formData.phone || '',
+          parentName: formData.parentName,
+          parentPhone: formData.parentPhone,
+          parent2Name: formData.parent2Name || '',
+          parent2Phone: formData.parent2Phone || '',
+          gender: formData.gender,
+          secondaryStages: formData.secondaryStages || [],
+          notes: formData.notes
+        });
+      } else if (isServant) {
+        await onSave({
+          name: formData.name,
+          assignedStage: formData.assignedStage,
+          assignedStages: formData.assignedStages || [],
+          phone: formData.phone,
+          birthDate: formData.birthDate,
+          birthMonth: month,
+          roleTitle: formData.roleTitle,
+          notes: formData.notes
+        });
+      } else {
+        // Supervisor / Leadership appointment
+        const isAssistant = formData.isAssistant || formData.roleType === 'assistant_supervisor';
+        const stage = formData.supervisedStage || formData.assignedStage || 'عامة';
+        const leadershipTitle = isAssistant ? `مساعد أمين مرحلة (${stage})` : `أمين مرحلة (${stage})`;
 
-      onSave({
-        servantId: supervisorSelectionMode === 'pick_existing' ? selectedServantId : undefined,
-        name: formData.name,
-        supervisedStage: stage,
-        assignedStage: stage,
-        title: leadershipTitle,
-        isAssistant: isAssistant,
-        roleType: isAssistant ? 'assistant_supervisor' : 'supervisor',
-        phone: formData.phone,
-        birthDate: formData.birthDate,
-        birthMonth: month,
-        notes: formData.notes
-      });
+        await onSave({
+          servantId: supervisorSelectionMode === 'pick_existing' ? selectedServantId : undefined,
+          name: formData.name,
+          supervisedStage: stage,
+          assignedStage: stage,
+          title: leadershipTitle,
+          isAssistant: isAssistant,
+          roleType: isAssistant ? 'assistant_supervisor' : 'supervisor',
+          phone: formData.phone,
+          birthDate: formData.birthDate,
+          birthMonth: month,
+          notes: formData.notes
+        });
+      }
+
+      onClose();
+    } catch (err: any) {
+      setFormError(err?.message || 'حدث خطأ أثناء حفظ البيانات. يرجى المحاولة مرة أخرى.');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    onClose();
   };
 
   if (!isOpen) return null;
@@ -451,18 +470,24 @@ export const PersonModal: React.FC<PersonModalProps> = ({
             </label>
             <select
               value={isChild ? formData.stage : isServant ? formData.assignedStage : formData.supervisedStage}
+              disabled={isChild && !canModifyChildrenStage}
               onChange={(e) => {
                 const val = e.target.value;
                 if (isChild) setFormData({ ...formData, stage: val });
                 else if (isServant) setFormData({ ...formData, assignedStage: val });
                 else setFormData({ ...formData, supervisedStage: val, assignedStage: val });
               }}
-              className="w-full bg-stone-50 dark:bg-[#240b17] border border-amber-200/80 dark:border-[#4d1d2c] rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-stone-200 focus:outline-none focus:ring-2 focus:ring-burgundy-600/30 cursor-pointer"
+              className="w-full bg-stone-50 dark:bg-[#240b17] border border-amber-200/80 dark:border-[#4d1d2c] rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-stone-200 focus:outline-none focus:ring-2 focus:ring-burgundy-600/30 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {stagesList.map(s => (
                 <option key={s.id || s.name} value={s.name}>{s.name}</option>
               ))}
             </select>
+            {isChild && !canModifyChildrenStage && (
+              <p className="text-[11px] text-rose-700 dark:text-rose-300 font-bold mt-1">
+                صلاحية تعيين أو نقل المخدومين غير مفعلة لهذا الحساب.
+              </p>
+            )}
 
             {/* Multi-stage selection for Servants */}
             {isServant && (
@@ -527,14 +552,16 @@ export const PersonModal: React.FC<PersonModalProps> = ({
                       <button
                         key={stg.id || stg.name}
                         type="button"
+                        disabled={!canModifyChildrenStage}
                         onClick={() => {
+                          if (!canModifyChildrenStage) return;
                           const current = formData.secondaryStages || [];
                           const updated = isSelected 
                             ? current.filter((s: string) => s !== stg.name)
                             : [...current, stg.name];
                           setFormData({ ...formData, secondaryStages: updated });
                         }}
-                        className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                           isSelected 
                             ? 'bg-amber-600 text-white shadow-xs font-black' 
                             : 'bg-white dark:bg-[#1a0a12] text-slate-700 dark:text-stone-300 border border-amber-200/60 dark:border-[#3e1423] hover:bg-amber-100 dark:hover:bg-[#2e101c]'
@@ -724,9 +751,10 @@ export const PersonModal: React.FC<PersonModalProps> = ({
             </button>
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-churchgold-600 to-amber-600 hover:from-churchgold-700 hover:to-amber-700 text-burgundy-950 font-black shadow-md transition-all cursor-pointer border border-churchgold-400/40"
+              disabled={isSubmitting || (isChild && !canModifyChildrenStage)}
+              className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-churchgold-600 to-amber-600 hover:from-churchgold-700 hover:to-amber-700 text-burgundy-950 font-black shadow-md transition-all cursor-pointer border border-churchgold-400/40 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isSupervisor ? 'تأكيد التكليف القيادي' : 'حفظ البيانات'}
+              {isSubmitting ? 'جاري الحفظ...' : isSupervisor ? 'تأكيد التكليف القيادي' : 'حفظ البيانات'}
             </button>
           </div>
 

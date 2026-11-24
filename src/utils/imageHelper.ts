@@ -121,3 +121,17 @@ export function isSafeImageUrl(url?: string | null): boolean {
   if (/^data:image\/(jpeg|jpg|png|webp|gif);base64,/i.test(trimmed)) return true;
   return false;
 }
+
+/**
+ * Compresses user profile avatar photos tightly (256x256) so they fit safely
+ * in Firestore user documents alongside all profile metadata.
+ */
+export async function compressAvatarImage(file: File): Promise<string> {
+  return compressImageToDataUrl(file, {
+    maxWidth: 256,
+    maxHeight: 256,
+    quality: 0.72,
+    outputMimeType: 'image/jpeg',
+  });
+}
+
