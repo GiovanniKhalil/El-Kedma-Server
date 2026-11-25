@@ -68,6 +68,7 @@ service cloud.firestore {
         data.role in ['amin_khedma_am', 'amin_fasl', 'mosaed_amin', 'khadem', 'general_dock'] &&
         (!('phone' in data) || (data.phone is string && data.phone.size() <= 24)) &&
         (!('username' in data) || (data.username is string && data.username.size() <= 50)) &&
+        (!('authEmail' in data) || (data.authEmail is string && data.authEmail.size() <= 160)) &&
         (!('assignedClass' in data) || (data.assignedClass is string && data.assignedClass.size() <= 100)) &&
         (!('assignedStage' in data) || (data.assignedStage is string && data.assignedStage.size() <= 100)) &&
         (!('assignments' in data) || (data.assignments is list && data.assignments.size() <= 20)) &&
@@ -145,14 +146,57 @@ service cloud.firestore {
     }
 
     function isValidSeasonalEvent(data) {
-      return data.keys().hasAll(['title', 'date']) &&
-        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
-        data.date is string && data.date.size() >= 8 && data.date.size() <= 20;
+      return (
+          (data.keys().hasAll(['name', 'startDate']) &&
+            data.name is string && data.name.size() >= 1 && data.name.size() <= 200 &&
+            data.startDate is string && data.startDate.size() >= 8 && data.startDate.size() <= 20) ||
+          (data.keys().hasAll(['title', 'date']) &&
+            data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+            data.date is string && data.date.size() >= 8 && data.date.size() <= 20)
+        ) &&
+        (!('endDate' in data) || (data.endDate is string && data.endDate.size() <= 20)) &&
+        (!('stageScope' in data) || (data.stageScope is string && data.stageScope.size() <= 100)) &&
+        (!('isActive' in data) || data.isActive is bool);
+    }
+
+    function isValidLoginAlias(data) {
+      return data.keys().hasAll(['authEmail']) &&
+        data.keys().hasOnly(['authEmail']) &&
+        data.authEmail is string &&
+        data.authEmail.size() >= 5 &&
+        data.authEmail.size() <= 160;
     }
 
     // =========================================================================
     // Collection Rules (Zero Unauthenticated Reads, Protected Root & Anti-Escalation)
     // =========================================================================
+
+    // Seed-Once Root Bootstrap Lock (Zero PII)
+    match /app_meta/{docId} {
+      allow get: if docId == 'root_status' && request.auth != null;
+      allow list, update, delete: if false;
+      allow create: if docId == 'root_status' &&
+        isAuthenticated() &&
+        !exists(/databases/$(database)/documents/app_meta/root_status) &&
+        incoming().keys().hasAll(['initialized', 'createdAt']) &&
+        incoming().keys().hasOnly(['initialized', 'createdAt']) &&
+        incoming().initialized == true &&
+        incoming().createdAt is string &&
+        incoming().createdAt.size() <= 40;
+    }
+
+    // Zero-PII Login Alias Index (Resolves updated username/phone to canonical Firebase Auth email)
+    match /login_aliases/{aliasId} {
+      allow get: if isValidId(aliasId) && request.auth != null;
+      allow list: if false;
+      allow create, update: if isValidId(aliasId) &&
+        isAuthenticated() &&
+        isValidLoginAlias(incoming()) &&
+        (isAminKhedmaAm() || incoming().authEmail == request.auth.token.email);
+      allow delete: if isValidId(aliasId) &&
+        isAuthenticated() &&
+        (isAminKhedmaAm() || existing().authEmail == request.auth.token.email);
+    }
 
     // Users collection
     match /users/{userId} {
@@ -164,6 +208,14 @@ service cloud.firestore {
         isValidUserPayload(incoming()) &&
         (
           isAminKhedmaAm() ||
+          (
+            incoming().role == 'amin_khedma_am' &&
+            incoming().get('isProtectedRoot', false) == true &&
+            userId == request.auth.uid &&
+            incoming().uid == request.auth.uid &&
+            !exists(/databases/$(database)/documents/app_meta/root_status) &&
+            existsAfter(/databases/$(database)/documents/app_meta/root_status)
+          ) ||
           (incoming().role in ['khadem', 'general_dock'] &&
             incoming().get('isProtectedRoot', false) == false &&
             incoming().get('isAdminAssistant', false) == false)
@@ -306,7 +358,9 @@ service cloud.firestore {
     // Seasonal events collection
     match /seasonal_events/{eventId} {
       allow get: if isValidId(eventId) && isAuthenticated();
-      allow list: if isAuthenticated() && resource.data.title is string;
+      allow list: if isAuthenticated() &&
+        (('name' in resource.data && resource.data.name is string) ||
+         ('title' in resource.data && resource.data.title is string));
       allow create: if isValidId(eventId) && isAminFaslOrAbove() && isValidSeasonalEvent(incoming());
       allow update: if isValidId(eventId) && isAminFaslOrAbove() && isValidSeasonalEvent(incoming()) && immutableAuditFields();
       allow delete: if isValidId(eventId) && isAminKhedmaAm();

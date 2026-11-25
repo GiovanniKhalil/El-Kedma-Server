@@ -22,6 +22,7 @@
         "mustChangePassword": { "type": "boolean", "description": "Requires password update on next login" },
         "isFirstLogin": { "type": "boolean", "description": "Legacy flag for temporary password change" },
         "username": { "type": "string", "description": "Unique username (letters, dot, underscore)", "maxLength": 50 },
+        "authEmail": { "type": "string", "description": "Immutable Firebase Auth email identity", "maxLength": 160 },
         "passwordHash": { "type": "string", "description": "Encrypted SHA-256 password hash", "maxLength": 128 },
         "createdAt": { "type": "string", "description": "Immutable creation timestamp", "maxLength": 40 },
         "updatedAt": { "type": "string", "description": "Last update timestamp", "maxLength": 40 }
@@ -156,15 +157,36 @@
     },
     "SeasonalEvent": {
       "title": "SeasonalEvent",
-      "description": "Church seasonal event (Mahragan, retreats, feasts)",
+      "description": "Church seasonal event (retreats, feasts, temporary festivals)",
       "type": "object",
       "properties": {
-        "title": { "type": "string", "description": "Event title", "maxLength": 200 },
-        "date": { "type": "string", "description": "Event date YYYY-MM-DD", "maxLength": 20 },
-        "stage": { "type": "string", "description": "Target stage or all", "maxLength": 100 },
+        "name": { "type": "string", "description": "Event name", "maxLength": 200 },
+        "startDate": { "type": "string", "description": "Event start date YYYY-MM-DD", "maxLength": 20 },
+        "endDate": { "type": "string", "description": "Event end date YYYY-MM-DD", "maxLength": 20 },
+        "stageScope": { "type": "string", "description": "Target stage or all", "maxLength": 100 },
+        "isActive": { "type": "boolean", "description": "Active status flag" },
         "createdAt": { "type": "string", "description": "Creation timestamp", "maxLength": 40 }
       },
-      "required": ["title", "date"]
+      "required": ["name", "startDate"]
+    },
+    "AppMeta": {
+      "title": "AppMeta",
+      "description": "Zero-PII bootstrap lock indicating root admin was seeded once",
+      "type": "object",
+      "properties": {
+        "initialized": { "type": "boolean", "description": "True once root amin_khedma_am is initialized" },
+        "createdAt": { "type": "string", "description": "Initialization timestamp", "maxLength": 40 }
+      },
+      "required": ["initialized", "createdAt"]
+    },
+    "LoginAlias": {
+      "title": "LoginAlias",
+      "description": "Zero-PII mapping from username or phone alias to canonical Auth email",
+      "type": "object",
+      "properties": {
+        "authEmail": { "type": "string", "description": "Canonical Firebase Auth email", "maxLength": 160 }
+      },
+      "required": ["authEmail"]
     }
   },
   "firestore": {
@@ -198,7 +220,15 @@
     },
     "/seasonal_events/{eventId}": {
       "schema": { "$ref": "#/entities/SeasonalEvent" },
-      "description": "Seasonal events and festival tracking"
+      "description": "Seasonal events and temporary event tracking"
+    },
+    "/app_meta/{docId}": {
+      "schema": { "$ref": "#/entities/AppMeta" },
+      "description": "System initialization metadata"
+    },
+    "/login_aliases/{aliasId}": {
+      "schema": { "$ref": "#/entities/LoginAlias" },
+      "description": "Lookup index resolving updated username or phone to canonical Firebase Auth email"
     }
   }
 }

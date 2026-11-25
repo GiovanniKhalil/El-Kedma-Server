@@ -20,7 +20,7 @@ export const ChurchHierarchyTree: React.FC = () => {
   const primaryAdmin = generalAdmins[0] || {
     id: 'admin_root',
     name: 'أمين الخدمة العام',
-    username: 'admin',
+    username: '',
     phone: '',
     role: 'amin_khedma_am'
   };

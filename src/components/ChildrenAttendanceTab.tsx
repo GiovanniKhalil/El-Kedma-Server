@@ -17,7 +17,7 @@ export const ChildrenAttendanceTab: React.FC = () => {
   const { 
     children, attendance, markAttendance, markAllAttendance, 
     getAttendanceRecord, selectedStageScope, activeStageName, role, currentUser, 
-    stagesList, setActiveTab 
+    stagesList, seasonalEvents, setActiveTab 
   } = useApp();
   
   const userStages = Array.from(new Set([
@@ -141,8 +141,10 @@ export const ChildrenAttendanceTab: React.FC = () => {
     switch (type) {
       case 'mass': return 'القداس الإلهي';
       case 'sunday_school': return 'مدارس الأحد';
-      case 'festival': return 'المهرجان (مهرجان الكرازة)';
-      default: return 'نشاط كنسي';
+      default: {
+        const seasonal = seasonalEvents.find(ev => ev.id === type);
+        return seasonal ? seasonal.name : 'مناسبة موسمية';
+      }
     }
   };
 
@@ -194,16 +196,20 @@ export const ChildrenAttendanceTab: React.FC = () => {
 
   // Monthly Attendance Excel Export (.xlsx)
   const handleExportMonthlyExcel = (monthToExport: number) => {
-    const eventMapped: any = selectedEventType === 'festival' ? 'mahragan' : selectedEventType;
     exportAttendanceMonthToXLSX(
       attendance,
       searchedChildren,
       monthToExport,
-      eventMapped,
-      selectedStage === 'all' ? 'جميع المراحل' : selectedStage
+      selectedEventType,
+      selectedStage === 'all' ? 'جميع المراحل' : selectedStage,
+      getEventNameArabic(selectedEventType)
     );
     setShowMonthExportModal(false);
   };
+
+  const activeSeasonalEvents = seasonalEvents.filter(
+    ev => ev.isActive && (ev.stageScope === 'all' || selectedStage === 'all' || ev.stageScope === selectedStage)
+  );
 
   const eventButtons: { id: ChildEventType; label: string; icon: any; color: string; activeBg: string }[] = [
     {
@@ -220,13 +226,13 @@ export const ChildrenAttendanceTab: React.FC = () => {
       color: 'text-burgundy-700 dark:text-churchgold-300',
       activeBg: 'bg-gradient-to-r from-burgundy-700 to-burgundy-800 text-white shadow-burgundy-950/40 border-churchgold-400/40'
     },
-    {
-      id: 'festival',
-      label: 'المهرجان (مهرجان الكرازة)',
+    ...activeSeasonalEvents.map(ev => ({
+      id: ev.id,
+      label: ev.name,
       icon: Sparkles,
       color: 'text-emerald-600 dark:text-emerald-400',
       activeBg: 'bg-gradient-to-r from-emerald-700 to-teal-800 text-white shadow-emerald-950/30 border-emerald-400/40'
-    }
+    }))
   ];
 
   return (
@@ -281,13 +287,13 @@ export const ChildrenAttendanceTab: React.FC = () => {
         </div>
       </div>
 
-      {/* Event Buttons (3 Buttons: القداس / مدارس الأحد / المهرجان) */}
+      {/* Event Buttons (القداس / مدارس الأحد + المناسبات الموسمية) */}
       <div className="bg-white dark:bg-[#1a0a12] p-3 sm:p-5 rounded-2xl sm:rounded-3xl border border-amber-200/80 dark:border-[#3e1423] shadow-xs space-y-3 sm:space-y-4 no-print transition-colors duration-200">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-amber-100/70 dark:border-[#381321] pb-3">
           <div>
             <h2 className="text-base sm:text-xl font-black text-slate-900 dark:text-stone-100">تسجيل حضور وغياب الأولاد</h2>
             <p className="text-[11px] sm:text-xs text-slate-500 dark:text-stone-400 mt-0.5">
-              اختر نوع النشاط (القداس، مدارس الأحد، المهرجان) وسجل الحضور
+              اختر نوع النشاط (القداس، مدارس الأحد، أو المناسبات الموسمية المفعّلة) وسجل الحضور
             </p>
           </div>
 
@@ -405,8 +411,8 @@ export const ChildrenAttendanceTab: React.FC = () => {
           </div>
         )}
 
-        {/* The 3 Required Activity Buttons (Single horizontal row on mobile) */}
-        <div className="grid grid-cols-3 gap-1.5 sm:gap-3">
+        {/* Activity Buttons */}
+        <div className={`grid gap-1.5 sm:gap-3 ${eventButtons.length >= 3 ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-2'}`}>
           {eventButtons.map(btn => {
             const Icon = btn.icon;
             const isActive = selectedEventType === btn.id;
@@ -942,7 +948,7 @@ export const ChildrenAttendanceTab: React.FC = () => {
         onClose={() => setShowPrintModal(false)}
         initialStage={selectedStage}
         initialMonth={monthForExport}
-        initialEvent={selectedEventType === 'festival' ? 'mahragan' : selectedEventType}
+        initialEvent={selectedEventType}
         reportType="attendance"
       />
 

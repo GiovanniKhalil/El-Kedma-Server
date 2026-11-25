@@ -113,10 +113,11 @@ export function exportAttendanceMonthToXLSX(
   childrenList: Child[],
   selectedMonth: number,
   eventType: EventType,
-  stageFilter: string
+  stageFilter: string,
+  customEventLabel?: string
 ): void {
   const monthName = MONTHS.find(m => m.value === selectedMonth)?.label || `شهر ${selectedMonth}`;
-  const eventLabel = EVENT_LABELS[eventType] || eventType;
+  const eventLabel = customEventLabel || EVENT_LABELS[eventType] || eventType;
 
   // Filter attendance records by month and event
   const monthRecords = attendanceRecords.filter(a => {

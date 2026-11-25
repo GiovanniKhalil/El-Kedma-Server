@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { Supervisor } from '../types';
 import { MONTHS, AREAS } from '../data/mockData';
 import { 
   Search, Crown, Plus, Briefcase, Phone, MessageCircle, 

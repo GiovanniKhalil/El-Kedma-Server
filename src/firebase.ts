@@ -59,10 +59,18 @@ export function formatSafeFirebasePass(rawPass: string): string {
   return `${clean}_church`;
 }
 
-// Email & Password Sign In with legacy domain fallback and auto-provisioning
-export async function loginWithFirebaseAuth(emailOrUsername: string, pass: string): Promise<FirebaseUser> {
-  const email = formatSafeChurchEmail(emailOrUsername, 'stjohn.church');
-  const legacyEmail = formatSafeChurchEmail(emailOrUsername, 'church.org');
+// Email & Password Sign In with legacy domain fallback (no stray auto-provisioning on typos)
+export async function loginWithFirebaseAuth(
+  emailOrUsername: string,
+  pass: string,
+  options: { resolvedAuthEmail?: string; domain?: string } = {}
+): Promise<FirebaseUser> {
+  const email = options.resolvedAuthEmail
+    ? options.resolvedAuthEmail.trim().toLowerCase()
+    : formatSafeChurchEmail(emailOrUsername, options.domain || 'stjohn.church');
+  const legacyEmail = options.resolvedAuthEmail
+    ? email
+    : formatSafeChurchEmail(emailOrUsername, 'church.org');
   const securePass = formatSafeFirebasePass(pass);
 
   try {
@@ -74,35 +82,42 @@ export async function loginWithFirebaseAuth(emailOrUsername: string, pass: strin
       err.code === 'auth/invalid-credential' ||
       err.code === 'auth/invalid-login-credentials'
     ) {
-      // Try legacy @church.org auth account if present
+      // Try legacy @church.org auth account if distinct
       if (legacyEmail !== email) {
         try {
           const legacyCred = await signInWithEmailAndPassword(auth, legacyEmail, securePass);
           return legacyCred.user;
         } catch {
-          // Proceed to provisioning @stjohn.church
+          // Handled below
         }
       }
-
-      try {
-        const newCred = await createUserWithEmailAndPassword(auth, email, securePass);
-        return newCred.user;
-      } catch (createErr: any) {
-        if (createErr.code === 'auth/email-already-in-use') {
-          try {
-            const retryCred = await signInWithEmailAndPassword(auth, email, securePass);
-            return retryCred.user;
-          } catch {
-            // Handled below
-          }
-        }
-        throw new Error('اسم المستخدم أو كلمة السر غير صحيحة');
-      }
+      throw new Error('اسم المستخدم أو كلمة السر غير صحيحة');
     } else if (err.code === 'auth/wrong-password') {
       throw new Error('كلمة السر غير صحيحة');
     } else {
       throw new Error(err.message || 'فشل تسجيل الدخول');
     }
+  }
+}
+
+/**
+ * Creates the Firebase Auth user strictly once during initial Root Admin bootstrap.
+ */
+export async function createRootFirebaseAuthUser(
+  username: string,
+  pass: string
+): Promise<{ user: FirebaseUser; authEmail: string; createdNew: boolean }> {
+  const authEmail = formatSafeChurchEmail(username, 'stjohn.church');
+  const securePass = formatSafeFirebasePass(pass);
+  try {
+    const cred = await createUserWithEmailAndPassword(auth, authEmail, securePass);
+    return { user: cred.user, authEmail, createdNew: true };
+  } catch (err: any) {
+    if (err?.code === 'auth/email-already-in-use') {
+      const signInCred = await signInWithEmailAndPassword(auth, authEmail, securePass);
+      return { user: signInCred.user, authEmail, createdNew: false };
+    }
+    throw err;
   }
 }
 
@@ -145,7 +160,7 @@ export async function provisionFirebaseAuthUser(
 }
 
 /**
- * Uses anonymous Firebase Auth strictly for submitting isolated signup requests to /pending_registrations.
+ * Uses anonymous Firebase Auth strictly for submitting isolated signup requests or reading zero-PII bootstrap/alias docs.
  */
 export async function signInAnonymouslyForPendingRegistration(): Promise<FirebaseUser> {
   const cred = await signInAnonymously(auth);

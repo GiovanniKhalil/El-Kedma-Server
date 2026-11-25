@@ -10,9 +10,12 @@ import {
   writeBatch,
   query,
   where,
-  limit
+  limit,
+  DocumentReference
 } from 'firebase/firestore';
+import { signInAnonymously, signOut } from 'firebase/auth';
 import {
+  auth,
   db,
   handleFirestoreError,
   OperationType,
@@ -33,6 +36,7 @@ export interface FirestoreUser {
   assignedStages?: string[];
   isFirstLogin: boolean;
   username?: string;
+  authEmail?: string;
   passwordHash?: string;
   assignments?: { stageId: string; stageName: string; role: string }[];
   isProtectedRoot?: boolean;
@@ -164,6 +168,9 @@ export const COLLECTIONS = {
   STAGES: 'stages',
   PENDING_REGISTRATIONS: 'pending_registrations',
   SEASONAL_EVENTS: 'seasonal_events',
+  APP_META: 'app_meta',
+  LOGIN_ALIASES: 'login_aliases',
+  TEST: 'test',
 } as const;
 
 function stripUndefined<T extends Record<string, any>>(obj: T): Record<string, any> {
@@ -174,6 +181,35 @@ function stripUndefined<T extends Record<string, any>>(obj: T): Record<string, a
     }
   }
   return result;
+}
+
+function normalizeArabicDigits(val: string): string {
+  return val.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+}
+
+export function toLoginAliasId(prefix: 'u' | 'p', rawValue: string): string {
+  const clean = normalizeArabicDigits((rawValue || '').trim());
+  if (!clean) return '';
+  if (prefix === 'p') {
+    const digits = clean.replace(/\D/g, '');
+    return digits.length >= 6 ? `p_${digits}`.slice(0, 128) : '';
+  }
+  const lower = clean.toLowerCase();
+  if (/^[a-z0-9._-]+$/.test(lower)) {
+    return `u_${lower}`.slice(0, 128);
+  }
+  const bytes = new TextEncoder().encode(lower);
+  const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `u_x_${hex}`.slice(0, 128);
+}
+
+async function commitChunkedDeletes(refs: DocumentReference[]): Promise<void> {
+  for (let i = 0; i < refs.length; i += 450) {
+    const batch = writeBatch(db);
+    const slice = refs.slice(i, i + 450);
+    slice.forEach((ref) => batch.delete(ref));
+    await batch.commit();
+  }
 }
 
 // ============================================================================
@@ -580,42 +616,246 @@ export async function deleteUserFromFirestore(uidOrUsername: string): Promise<vo
   }
 }
 
+export async function checkRootBootstrapStatusFromFirestore(): Promise<boolean> {
+  let createdAnonSession = false;
+  try {
+    if (!auth.currentUser) {
+      await signInAnonymously(auth);
+      createdAnonSession = true;
+    }
+    const snap = await getDoc(doc(db, COLLECTIONS.APP_META, 'root_status'));
+    return snap.exists() && snap.data()?.initialized === true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `${COLLECTIONS.APP_META}/root_status`);
+    // Fail-safe to true if network unavailable so normal login form remains usable
+    return true;
+  } finally {
+    if (createdAnonSession && auth.currentUser?.isAnonymous) {
+      await signOut(auth).catch(() => undefined);
+    }
+  }
+}
+
+export async function ensureRootBootstrapLockInFirestore(): Promise<void> {
+  try {
+    const lockRef = doc(db, COLLECTIONS.APP_META, 'root_status');
+    const snap = await getDoc(lockRef);
+    if (!snap.exists()) {
+      await setDoc(lockRef, {
+        initialized: true,
+        createdAt: new Date().toISOString()
+      });
+    }
+  } catch {
+    // Ignore if already exists or unauthorized
+  }
+}
+
+export async function seedRootAdminOnceInFirestore(
+  user: FirestoreUser,
+  authEmail: string
+): Promise<{ seeded: boolean; alreadyExists?: boolean }> {
+  const path = `${COLLECTIONS.USERS}/${user.uid}`;
+  try {
+    const usersSnap = await getDocs(query(collection(db, COLLECTIONS.USERS), limit(1)));
+    if (!usersSnap.empty) {
+      await ensureRootBootstrapLockInFirestore();
+      return { seeded: false, alreadyExists: true };
+    }
+
+    const now = new Date().toISOString();
+    const batch = writeBatch(db);
+
+    batch.set(doc(db, COLLECTIONS.APP_META, 'root_status'), {
+      initialized: true,
+      createdAt: now
+    });
+
+    batch.set(
+      doc(db, COLLECTIONS.USERS, user.uid),
+      stripUndefined({
+        ...user,
+        uid: user.uid,
+        role: 'amin_khedma_am',
+        isProtectedRoot: true,
+        authEmail,
+        username: (user.username || user.uid).toLowerCase().trim(),
+        createdAt: user.createdAt || now,
+        updatedAt: now
+      })
+    );
+
+    const uAlias = toLoginAliasId('u', user.username || '');
+    if (uAlias) {
+      batch.set(doc(db, COLLECTIONS.LOGIN_ALIASES, uAlias), { authEmail });
+    }
+    const pAlias = toLoginAliasId('p', user.phone || '');
+    if (pAlias) {
+      batch.set(doc(db, COLLECTIONS.LOGIN_ALIASES, pAlias), { authEmail });
+    }
+
+    await batch.commit();
+    return { seeded: true };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+    throw error;
+  }
+}
+
+export async function resolveAuthEmailViaAlias(identifier: string): Promise<string | null> {
+  const clean = (identifier || '').trim();
+  if (!clean) return null;
+
+  let createdAnonSession = false;
+  try {
+    if (!auth.currentUser) {
+      await signInAnonymously(auth);
+      createdAnonSession = true;
+    }
+
+    const candidateIds: string[] = [];
+    const uAlias = toLoginAliasId('u', clean);
+    if (uAlias) candidateIds.push(uAlias);
+    const pAlias = toLoginAliasId('p', clean);
+    if (pAlias) candidateIds.push(pAlias);
+
+    for (const aliasId of candidateIds) {
+      try {
+        const snap = await getDoc(doc(db, COLLECTIONS.LOGIN_ALIASES, aliasId));
+        if (snap.exists() && typeof snap.data()?.authEmail === 'string') {
+          return snap.data()!.authEmail as string;
+        }
+      } catch {
+        // Ignore single alias lookup error
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    if (createdAnonSession && auth.currentUser?.isAnonymous) {
+      await signOut(auth).catch(() => undefined);
+    }
+  }
+}
+
+export async function syncUserLoginAliases(params: {
+  authEmail: string;
+  username?: string;
+  phone?: string;
+  oldUsername?: string;
+  oldPhone?: string;
+}): Promise<void> {
+  const cleanAuthEmail = (params.authEmail || '').trim().toLowerCase();
+  if (!cleanAuthEmail) return;
+
+  try {
+    const newUserAlias = params.username ? toLoginAliasId('u', params.username) : '';
+    const newPhoneAlias = params.phone ? toLoginAliasId('p', params.phone) : '';
+    const oldUserAlias = params.oldUsername ? toLoginAliasId('u', params.oldUsername) : '';
+    const oldPhoneAlias = params.oldPhone ? toLoginAliasId('p', params.oldPhone) : '';
+
+    if (oldUserAlias && oldUserAlias !== newUserAlias) {
+      await deleteDoc(doc(db, COLLECTIONS.LOGIN_ALIASES, oldUserAlias)).catch(() => undefined);
+    }
+    if (oldPhoneAlias && oldPhoneAlias !== newPhoneAlias) {
+      await deleteDoc(doc(db, COLLECTIONS.LOGIN_ALIASES, oldPhoneAlias)).catch(() => undefined);
+    }
+    if (newUserAlias) {
+      await setDoc(doc(db, COLLECTIONS.LOGIN_ALIASES, newUserAlias), { authEmail: cleanAuthEmail });
+    }
+    if (newPhoneAlias) {
+      await setDoc(doc(db, COLLECTIONS.LOGIN_ALIASES, newPhoneAlias), { authEmail: cleanAuthEmail });
+    }
+  } catch {
+    // Alias sync is best-effort for lookup convenience
+  }
+}
+
 export async function clearAllNonAdminUsersFromFirestore(adminUid: string): Promise<void> {
   const usersSnap = await getDocs(collection(db, COLLECTIONS.USERS));
-  const batch = writeBatch(db);
-  let count = 0;
+  const toDelete: DocumentReference[] = [];
   for (const d of usersSnap.docs) {
     const data = d.data() as FirestoreUser;
     if (
       d.id !== adminUid &&
-      d.id !== 'admin' &&
       data.role !== 'amin_khedma_am' &&
-      !data.isProtectedRoot &&
-      data.username?.toLowerCase() !== 'admin'
+      !data.isProtectedRoot
     ) {
-      batch.delete(d.ref);
-      count++;
+      toDelete.push(d.ref);
     }
   }
-  if (count > 0) {
-    await batch.commit();
+  if (toDelete.length > 0) {
+    await commitChunkedDeletes(toDelete);
   }
 }
 
 export async function clearAllMakhdomeenFromFirestore(): Promise<void> {
   const snap = await getDocs(collection(db, COLLECTIONS.MAKHDOMEEN));
-  const batch = writeBatch(db);
-  let count = 0;
-  for (const d of snap.docs) {
-    batch.delete(d.ref);
-    count++;
-    if (count >= 450) {
-      await batch.commit();
-      count = 0;
+  const refs = snap.docs.map((d) => d.ref);
+  if (refs.length > 0) {
+    await commitChunkedDeletes(refs);
+  }
+}
+
+export async function wipeAllDatabaseFromFirestore(options: {
+  protectedRootUid?: string;
+  protectedAuthEmail?: string;
+}): Promise<void> {
+  const collectionsToEmpty = [
+    COLLECTIONS.MAKHDOMEEN,
+    COLLECTIONS.ATTENDANCE,
+    COLLECTIONS.LIBRARY,
+    COLLECTIONS.ANNOUNCEMENTS,
+    COLLECTIONS.PENDING_REGISTRATIONS,
+    COLLECTIONS.STAGES,
+    COLLECTIONS.SEASONAL_EVENTS,
+    COLLECTIONS.TEST
+  ];
+
+  for (const colName of collectionsToEmpty) {
+    try {
+      const snap = await getDocs(collection(db, colName));
+      if (!snap.empty) {
+        await commitChunkedDeletes(snap.docs.map((d) => d.ref));
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, colName);
+      throw err;
     }
   }
-  if (count > 0) {
-    await batch.commit();
+
+  // Clean non-root login aliases while preserving root admin aliases
+  try {
+    const aliasesSnap = await getDocs(collection(db, COLLECTIONS.LOGIN_ALIASES));
+    const aliasRefsToDelete = aliasesSnap.docs
+      .filter((d) => {
+        const email = String(d.data()?.authEmail || '').toLowerCase();
+        if (options.protectedAuthEmail && email === options.protectedAuthEmail.toLowerCase()) {
+          return false;
+        }
+        return true;
+      })
+      .map((d) => d.ref);
+    if (aliasRefsToDelete.length > 0) {
+      await commitChunkedDeletes(aliasRefsToDelete);
+    }
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, COLLECTIONS.LOGIN_ALIASES);
+  }
+
+  // Clean all non-root users while strictly preserving isProtectedRoot / amin_khedma_am
+  const usersSnap = await getDocs(collection(db, COLLECTIONS.USERS));
+  const userRefsToDelete = usersSnap.docs
+    .filter((d) => {
+      const data = d.data() as FirestoreUser;
+      if (data.isProtectedRoot === true || data.role === 'amin_khedma_am') return false;
+      if (options.protectedRootUid && d.id === options.protectedRootUid) return false;
+      return true;
+    })
+    .map((d) => d.ref);
+  if (userRefsToDelete.length > 0) {
+    await commitChunkedDeletes(userRefsToDelete);
   }
 }
 

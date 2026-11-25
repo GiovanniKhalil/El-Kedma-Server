@@ -53,7 +53,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
     loading: false
   });
 
-  const defaultStage = stagesList[0]?.name || 'ابتدائي (ثالثة ورابعة)';
+  const defaultStage = stagesList[0]?.name || 'عامة';
   const defaultStageId = stagesList[0]?.id || defaultStage;
 
   // Editing User State
@@ -1075,7 +1075,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                     required
                     value={editFormData.username}
                     onChange={(e) => setEditFormData({ ...editFormData, username: e.target.value })}
-                    placeholder="مثال: admin, mina_adel"
+                    placeholder="مثال: bishoy.amin, mina_adel"
                     className="w-full bg-stone-50 dark:bg-[#240b17] border border-amber-200/80 dark:border-[#4d1d2c] rounded-xl px-3 py-2 text-sm font-mono font-semibold text-slate-900 dark:text-stone-100 focus:bg-white dark:focus:bg-[#2c0e1c] focus:outline-none focus:ring-2 focus:ring-burgundy-600/30"
                   />
                 </div>

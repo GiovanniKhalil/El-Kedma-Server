@@ -28,7 +28,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 }) => {
   const { 
     activeTab, setActiveTab, role, currentUser, selectedStageScope, 
-    activeStageName, activeRoleInStage, children, servants, logout 
+    activeStageId, activeStageName, activeRoleInStage, stagesList, children, servants, logout 
   } = useApp();
 
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
@@ -55,6 +55,10 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
     const { day, month } = parseBirthDate(s.birthDate, s.birthMonth);
     return month === currentMonthNum && day === todayDay;
   }).length;
+
+  const activeStageMeta = stagesList.find(
+    s => s.name === effectiveStage || s.id === activeStageId
+  );
 
   const totalBirthdaysToday = todayKidsCount + todayServantsCount;
 
@@ -114,7 +118,16 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
               <p className="text-[11px] text-slate-500 dark:text-stone-400 hidden sm:flex items-center gap-1.5 mt-0.5">
                 <span>كنيسة ماريوحنا المعمدان بالمعراج</span>
                 <span className="text-churchgold-600 dark:text-churchgold-400">•</span>
-                <span className="text-slate-400 dark:text-stone-500">مطرانية المعادي</span>
+                {activeStageMeta ? (
+                  <span className="text-burgundy-800 dark:text-churchgold-300 font-bold truncate max-w-[180px]">
+                    {activeStageMeta.name}
+                    {activeStageMeta.supervisorName ? ` (${activeStageMeta.supervisorName})` : ''}
+                  </span>
+                ) : (
+                  <span className="text-slate-400 dark:text-stone-500">
+                    {stagesList.length > 0 ? `${stagesList.length} مراحل نشطة` : 'مطرانية المعادي'}
+                  </span>
+                )}
               </p>
             </div>
           </div>

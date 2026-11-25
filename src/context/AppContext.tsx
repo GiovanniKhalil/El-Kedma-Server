@@ -6,7 +6,6 @@ import {
   ChildEventType, StaffEventType, FilterState, AppUser, ChurchEventNotification,
   ThemeMode, PendingRegistration, SeasonalEvent
 } from '../types';
-import { DEFAULT_STAGES } from '../data/mockData';
 import { calculateDynamicAge } from '../utils/ageUtils';
 import {
   hashPassword,
@@ -51,10 +50,18 @@ import {
   deletePendingRegistrationFromFirestore,
   getUserFromFirestore,
   clearAllNonAdminUsersFromFirestore,
-  clearAllMakhdomeenFromFirestore
+  clearAllMakhdomeenFromFirestore,
+  checkRootBootstrapStatusFromFirestore,
+  ensureRootBootstrapLockInFirestore,
+  seedRootAdminOnceInFirestore,
+  resolveAuthEmailViaAlias,
+  syncUserLoginAliases,
+  wipeAllDatabaseFromFirestore
 } from '../services/firestoreService';
 import {
   auth,
+  formatSafeChurchEmail,
+  createRootFirebaseAuthUser,
   loginWithFirebaseAuth,
   provisionFirebaseAuthUser,
   signInAnonymouslyForPendingRegistration,
@@ -107,6 +114,13 @@ interface AppContextType {
   currentUser: AppUser | null;
   users: AppUser[];
   pendingRegistrations: PendingRegistration[];
+  isRootInitialized: boolean | null;
+  initializeRootAdmin: (data: {
+    name: string;
+    username: string;
+    phone: string;
+    password: string;
+  }) => Promise<{ success: boolean; error?: string }>;
   login: (username: string, pass: string) => Promise<{ success: boolean; error?: string; isTemp?: boolean }>;
   registerServant: (data: {
     name: string;
@@ -135,7 +149,6 @@ interface AppContextType {
   updateUser: (id: string, userData: Partial<AppUser>) => Promise<{ success: boolean; error?: string }>;
   deleteUser: (id: string) => Promise<void>;
   resetUserTempPassword: (id: string, tempPass: string) => Promise<void>;
-  resetUsersToDefault: () => void;
   clearAllNonAdminUsers: () => Promise<void>;
   clearAllMakhdomeen: () => Promise<void>;
 
@@ -205,8 +218,7 @@ interface AppContextType {
   ) => AttendanceRecord | undefined;
 
   // Database Management
-  clearAllDatabase: () => void;
-  resetToDefaultData: () => void;
+  clearAllDatabase: () => Promise<void>;
   exportDatabaseJSON: () => string;
   importDatabaseJSON: (jsonString: string) => { success: boolean; error?: string };
 
@@ -382,19 +394,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     return () => unsub();
   }, []);
 
-  // Stages / Services State
+  // Stages / Services State (Starts empty unless persisted by admin)
   const [stagesList, setStagesList] = useState<StageItem[]>(() => {
     const saved = localStorage.getItem('church_app_stages_list');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) return parsed;
       } catch {
-        return DEFAULT_STAGES;
+        return [];
       }
     }
-    return DEFAULT_STAGES;
+    return [];
   });
+
+  const [isRootInitialized, setIsRootInitialized] = useState<boolean | null>(null);
 
   const [users, setUsers] = useState<AppUser[]>(() => {
     const saved = localStorage.getItem('church_app_users');
@@ -483,7 +497,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     const firstAssign = currentUser?.assignments?.[0];
     if (firstAssign) return firstAssign.stageId;
     if (currentUser?.assignedStage && currentUser.assignedStage !== 'عامة' && currentUser.assignedStage !== 'في انتظار التعيين') {
-      const found = resolveStageItem(currentUser.assignedStage, DEFAULT_STAGES);
+      const found = resolveStageItem(currentUser.assignedStage, stagesList);
       return found?.id || currentUser.assignedStage;
     }
     return 'all';
@@ -707,7 +721,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
   const supervisorsRef = useRef(supervisors);
   const stagesListRef = useRef(stagesList);
   const currentUserRef = useRef(currentUser);
-  const seededStagesRef = useRef(false);
 
   useEffect(() => { usersRef.current = users; }, [users]);
   useEffect(() => { childrenRef.current = children; }, [children]);
@@ -798,6 +811,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     applyStageContextForUser(currentUserRef.current, stageIdOrName);
   };
 
+  // Check Root Admin bootstrap status cleanly when unauthenticated
+  useEffect(() => {
+    if (currentUser) {
+      setIsRootInitialized(true);
+      return;
+    }
+    let mounted = true;
+    checkRootBootstrapStatusFromFirestore()
+      .then((initialized) => {
+        if (mounted) setIsRootInitialized(initialized);
+      })
+      .catch(() => {
+        if (mounted) setIsRootInitialized(true);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [currentUser]);
+
   // ============================================================================
   // Real-Time Firebase Firestore Subscriptions (Bound to Non-Anonymous Auth Session)
   // ============================================================================
@@ -806,30 +838,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       return;
     }
 
-    // 1. Real-time listener for Stages
+    // 1. Real-time listener for Stages (Unconditional — zero auto-seeding of dummy stages)
     const unsubStages = listenToStages((firestoreStages) => {
-      if (firestoreStages.length > 0) {
-        const mapped: StageItem[] = firestoreStages.map(st => ({
-          id: st.id,
-          name: st.name,
-          description: st.description || '',
-          supervisorName: st.supervisorName || '',
-          supervisorPhone: st.supervisorPhone || '',
-          assistantSupervisors: Array.isArray(st.assistantSupervisors) ? st.assistantSupervisors : [],
-          captainName: st.captainName || st.supervisorName || '',
-          captainPhone: st.captainPhone || st.supervisorPhone || '',
-          firstMateName: st.firstMateName || '',
-          firstMatePhone: st.firstMatePhone || '',
-          meetingTime: st.meetingTime || '',
-          isCustom: Boolean(st.isCustom)
-        }));
-        setStagesList(mapped);
-      } else if (!seededStagesRef.current && currentUserRef.current?.role === 'amin_khedma_am') {
-        seededStagesRef.current = true;
-        batchSaveStagesToFirestore(DEFAULT_STAGES).catch(err =>
-          console.warn('Initial stage seed notice:', err)
-        );
-      }
+      const mapped: StageItem[] = firestoreStages.map(st => ({
+        id: st.id,
+        name: st.name,
+        description: st.description || '',
+        supervisorName: st.supervisorName || '',
+        supervisorPhone: st.supervisorPhone || '',
+        assistantSupervisors: Array.isArray(st.assistantSupervisors) ? st.assistantSupervisors : [],
+        captainName: st.captainName || st.supervisorName || '',
+        captainPhone: st.captainPhone || st.supervisorPhone || '',
+        firstMateName: st.firstMateName || '',
+        firstMatePhone: st.firstMatePhone || '',
+        meetingTime: st.meetingTime || '',
+        isCustom: Boolean(st.isCustom)
+      }));
+      setStagesList(mapped);
     });
 
     // 2. Real-time listener for Makhdomeen (Unconditional — empty array clears deleted items!)
@@ -948,6 +973,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
             id: docId,
             uid: docId,
             username: rawUsername,
+            authEmail: fu.authEmail || prevUser?.authEmail || formatSafeChurchEmail(rawUsername, 'stjohn.church'),
             name: fu.fullName || prevUser?.name || rawUsername,
             phone: fu.phone || prevUser?.phone || '',
             avatarUrl: fu.avatarUrl || prevUser?.avatarUrl || '',
@@ -1012,7 +1038,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         const directoryEligibleUsers = result.filter(
           u =>
             u.role !== 'amin_khedma_am' &&
-            u.username.toLowerCase() !== 'admin' &&
+            !u.isProtectedRoot &&
             (u.role === 'khadem' || u.role === 'amin_fasl' || u.role === 'mosaed_amin' || u.role === 'general_dock')
         );
 
@@ -1247,8 +1273,117 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
   }, [firebaseAuthState.uid, firebaseAuthState.isAnonymous, currentUser?.role, currentUser?.isAdminAssistant]);
 
   // ============================================================================
-  // Auth Methods
+  // Auth Methods (Seed-Once Protected Root + Alias-Aware Sign-In)
   // ============================================================================
+  const initializeRootAdmin = async (data: {
+    name: string;
+    username: string;
+    phone: string;
+    password: string;
+  }): Promise<{ success: boolean; error?: string }> => {
+    const cleanName = data.name.trim();
+    const cleanUsername = data.username.trim().toLowerCase();
+    const cleanPhone = data.phone.trim();
+    const cleanPass = data.password.trim();
+
+    if (!cleanName) {
+      return { success: false, error: 'يرجى إدخال اسم أمين الخدمة العام بالكامل.' };
+    }
+    const usernameCheck = validateUsername(cleanUsername, []);
+    if (!usernameCheck.valid) {
+      return { success: false, error: usernameCheck.error || 'اسم المستخدم غير صالح.' };
+    }
+    if (!cleanPhone || cleanPhone.length < 6) {
+      return { success: false, error: 'يرجى إدخال رقم هاتف صحيح (6 أرقام على الأقل).' };
+    }
+    if (!cleanPass || cleanPass.length < 4) {
+      return { success: false, error: 'كلمة السر يجب ألا تقل عن 4 خانات.' };
+    }
+
+    let createdAuthUser = null as Awaited<ReturnType<typeof createRootFirebaseAuthUser>>['user'] | null;
+    let didCreateAuthUser = false;
+
+    try {
+      const authRes = await createRootFirebaseAuthUser(cleanUsername, cleanPass);
+      createdAuthUser = authRes.user;
+      didCreateAuthUser = authRes.createdNew;
+      const canonicalUid = authRes.user.uid;
+      const encryptedHash = await hashPassword(cleanPass);
+      const createdAt = new Date().toISOString();
+
+      const seedResult = await seedRootAdminOnceInFirestore(
+        {
+          uid: canonicalUid,
+          username: cleanUsername,
+          authEmail: authRes.authEmail,
+          passwordHash: encryptedHash,
+          fullName: cleanName,
+          phone: cleanPhone,
+          role: 'amin_khedma_am',
+          assignedClass: 'عامة',
+          assignedStage: 'عامة',
+          assignedStages: [],
+          assignments: [],
+          isProtectedRoot: true,
+          isAdminAssistant: false,
+          canAssignMakhdomeen: true,
+          isFirstLogin: false,
+          mustChangePassword: false,
+          createdAt
+        },
+        authRes.authEmail
+      );
+
+      if (!seedResult.seeded) {
+        if (didCreateAuthUser && createdAuthUser) {
+          await createdAuthUser.delete().catch(() => undefined);
+        }
+        await logoutFirebaseAuth().catch(() => undefined);
+        setIsRootInitialized(true);
+        return {
+          success: false,
+          error: 'تمت تهيئة حساب أمين الخدمة العام مسبقاً في قاعدة البيانات. يرجى تسجيل الدخول بالبيانات المعتمدة.'
+        };
+      }
+
+      const rootUser: AppUser = {
+        id: canonicalUid,
+        uid: canonicalUid,
+        username: cleanUsername,
+        authEmail: authRes.authEmail,
+        name: cleanName,
+        phone: cleanPhone,
+        role: 'amin_khedma_am',
+        assignedStage: 'عامة',
+        assignedStages: [],
+        assignments: [],
+        isProtectedRoot: true,
+        isAdminAssistant: false,
+        canAssignMakhdomeen: true,
+        isTempPassword: false,
+        mustChangePassword: false,
+        password: encryptedHash,
+        createdAt: createdAt.split('T')[0]
+      };
+
+      setUsers([rootUser]);
+      setCurrentUser(rootUser);
+      setRoleState('amin_khedma_am');
+      setIsRootInitialized(true);
+      applyStageContextForUser(rootUser);
+      return { success: true };
+    } catch (err: any) {
+      if (didCreateAuthUser && createdAuthUser) {
+        await createdAuthUser.delete().catch(() => undefined);
+      }
+      await logoutFirebaseAuth().catch(() => undefined);
+      return {
+        success: false,
+        error: err?.message || 'تعذر تهيئة حساب أمين الخدمة العام.'
+      };
+    }
+  };
+
   const login = async (
     usernameOrPhone: string,
     pass: string
@@ -1261,20 +1396,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       return { success: false, error: 'يرجى إدخال اسم المستخدم وكلمة السر' };
     }
 
-    // 1. Check local cache to resolve phone -> username if available
+    // 1. Resolve canonical Firebase Auth email from local cache or zero-PII /login_aliases
     const cachedUser = usersRef.current.find(
       u =>
         u.username?.toLowerCase() === cleanLower ||
         (u.phone && u.phone.trim() === cleanInput) ||
         u.id === cleanInput
     );
+    let resolvedAuthEmail = cachedUser?.authEmail || undefined;
+    if (!resolvedAuthEmail) {
+      resolvedAuthEmail = (await resolveAuthEmailViaAlias(cleanInput)) || undefined;
+    }
     const authIdentifier = cachedUser?.username || cleanLower;
 
     // 2. Establish non-anonymous Firebase Auth session FIRST so Firestore rules permit reading /users
     let authUid: string | null = null;
+    let signedInEmail: string | undefined = resolvedAuthEmail;
     try {
-      const fbUser = await loginWithFirebaseAuth(authIdentifier, cleanPass);
+      const fbUser = await loginWithFirebaseAuth(authIdentifier, cleanPass, {
+        resolvedAuthEmail
+      });
       authUid = fbUser.uid;
+      signedInEmail = fbUser.email || resolvedAuthEmail || formatSafeChurchEmail(authIdentifier, 'stjohn.church');
     } catch (authErr: any) {
       // Allow local offline verification ONLY if cached locally
       if (!cachedUser) {
@@ -1308,6 +1451,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
           id: docId,
           uid: docId,
           username: firestoreUser.username || authIdentifier,
+          authEmail: firestoreUser.authEmail || signedInEmail || formatSafeChurchEmail(firestoreUser.username || docId, 'stjohn.church'),
           name: firestoreUser.fullName || found?.name || authIdentifier,
           phone: firestoreUser.phone || found?.phone || '',
           avatarUrl: firestoreUser.avatarUrl || found?.avatarUrl || '',
@@ -1356,6 +1500,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       updateUserInFirestore(found.id, { passwordHash: encrypted }).catch(() => undefined);
     }
 
+    // Ensure login aliases and bootstrap lock stay synchronized for future reloads
+    if (authUid && found.authEmail) {
+      syncUserLoginAliases({
+        authEmail: found.authEmail,
+        username: found.username,
+        phone: found.phone
+      }).catch(() => undefined);
+      if (found.role === 'amin_khedma_am') {
+        ensureRootBootstrapLockInFirestore().catch(() => undefined);
+      }
+    }
+
     // 5. Update state & activate Tree Context Switcher
     setUsers(prev => {
       const exists = prev.some(u => u.id === found!.id || u.username.toLowerCase() === found!.username.toLowerCase());
@@ -1368,6 +1524,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     const isTemp = Boolean(found.isTempPassword || found.mustChangePassword);
     setCurrentUser(found);
     setRoleState(found.role);
+    setIsRootInitialized(true);
     applyStageContextForUser(found);
 
     return { success: true, isTemp };
@@ -1460,15 +1617,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       return { success: false, error: invariantError };
     }
 
+    const cleanUsername = reg.username.toLowerCase().trim();
+    const authEmail = formatSafeChurchEmail(cleanUsername, 'stjohn.church');
     const rawTempPass = options.tempPassword?.trim() || 'temp' + Math.floor(1000 + Math.random() * 9000);
     const encryptedHash = await hashPassword(rawTempPass);
-    const provisionedUid = await provisionFirebaseAuthUser(reg.username, rawTempPass);
+    const provisionedUid = await provisionFirebaseAuthUser(cleanUsername, rawTempPass);
     const canonicalUid = provisionedUid || 'u_' + Date.now();
     const primaryStage = candidateAssignments[0]?.stageName || options.assignedStage || 'عامة';
 
     await addUserToFirestore({
       uid: canonicalUid,
-      username: reg.username.toLowerCase().trim(),
+      username: cleanUsername,
+      authEmail,
       passwordHash: encryptedHash,
       fullName: reg.fullName,
       phone: reg.phone,
@@ -1485,6 +1645,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       birthDate: reg.birthDate || '1995-01-01',
       notes: reg.notes || '',
       createdAt: new Date().toISOString()
+    });
+
+    await syncUserLoginAliases({
+      authEmail,
+      username: cleanUsername,
+      phone: reg.phone
     });
 
     await updatePendingRegistrationStatusInFirestore(regId, 'approved');
@@ -1575,6 +1741,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     }
 
     const cleanUsername = (userData.username || '').toLowerCase().trim();
+    const authEmail = formatSafeChurchEmail(cleanUsername, 'stjohn.church');
     const rawPass =
       userData.password && userData.password.trim()
         ? userData.password.trim()
@@ -1591,6 +1758,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       id: canonicalUid,
       uid: canonicalUid,
       username: cleanUsername,
+      authEmail,
       assignedStage: primaryStage,
       assignedStages: candidateAssignments.slice(1).map(a => a.stageName),
       assignments: candidateAssignments,
@@ -1609,6 +1777,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       await addUserToFirestore({
         uid: canonicalUid,
         username: cleanUsername,
+        authEmail,
         passwordHash: encryptedPassword,
         fullName: userData.name,
         phone: userData.phone || '',
@@ -1628,6 +1797,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         notes: userData.notes || '',
         createdAt: new Date().toISOString()
       });
+      await syncUserLoginAliases({
+        authEmail,
+        username: cleanUsername,
+        phone: userData.phone || ''
+      });
     } catch (err) {
       console.warn('Failed to add user to Firestore:', err);
     }
@@ -1646,6 +1820,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         (userData.phone && u.phone && u.phone.trim() === userData.phone.trim())
     );
     const canonicalUid = existingUser?.id || id;
+
+    if (userData.username !== undefined) {
+      const cleanNewUsername = userData.username.trim();
+      const usernameValidation = validateUsername(cleanNewUsername, usersRef.current, canonicalUid);
+      if (!usernameValidation.valid) {
+        return { success: false, error: usernameValidation.error || 'اسم المستخدم غير صالح' };
+      }
+    }
+
     const nextRole = userData.role || existingUser?.role || 'khadem';
     const stages = stagesListRef.current;
 
@@ -1673,15 +1856,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     }
 
     const updatedPayload: Partial<AppUser> = { ...userData };
+    let rawNewPassword: string | null = null;
     if (
       updatedPayload.password &&
       updatedPayload.password.trim() &&
       !/^[•*]+$/.test(updatedPayload.password.trim())
     ) {
-      updatedPayload.password = await hashPassword(updatedPayload.password.trim());
+      rawNewPassword = updatedPayload.password.trim();
+      updatedPayload.password = await hashPassword(rawNewPassword);
     } else {
       delete updatedPayload.password;
     }
+
+    const nextUsername = (updatedPayload.username || existingUser?.username || canonicalUid).toLowerCase().trim();
+    const canonicalAuthEmail =
+      existingUser?.authEmail ||
+      formatSafeChurchEmail(existingUser?.username || nextUsername, 'stjohn.church');
 
     const primaryStage =
       candidateAssignments[0]?.stageName ||
@@ -1689,6 +1879,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       existingUser?.assignedStage ||
       'عامة';
 
+    updatedPayload.username = nextUsername;
+    updatedPayload.authEmail = canonicalAuthEmail;
     updatedPayload.assignedStage = primaryStage;
     updatedPayload.assignedStages = candidateAssignments.slice(1).map(a => a.stageName);
     updatedPayload.assignments = candidateAssignments;
@@ -1702,19 +1894,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       setCurrentUser(updatedCurr);
       sessionStorage.setItem('church_app_current_user', JSON.stringify(updatedCurr));
       applyStageContextForUser(updatedCurr);
+
+      if (rawNewPassword) {
+        try {
+          await updateFirebaseUserPassword(formatSafeFirebasePass(rawNewPassword));
+        } catch (authPassErr) {
+          console.warn('Firebase Auth password sync notice:', authPassErr);
+        }
+      }
     }
 
     try {
+      const nextPhone = updatedPayload.phone ?? existingUser?.phone ?? '';
       const updateData: Record<string, any> = {
         uid: canonicalUid,
         fullName: updatedPayload.name ?? existingUser?.name ?? '',
-        phone: updatedPayload.phone ?? existingUser?.phone ?? '',
+        phone: nextPhone,
         role: nextRole,
         assignedClass: primaryStage,
         assignedStage: primaryStage,
         assignedStages: updatedPayload.assignedStages,
         assignments: candidateAssignments,
-        username: (updatedPayload.username || existingUser?.username || canonicalUid).toLowerCase().trim()
+        username: nextUsername,
+        authEmail: canonicalAuthEmail
       };
 
       if (updatedPayload.isTempPassword !== undefined) {
@@ -1731,6 +1933,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       if (updatedPayload.avatarUrl !== undefined) updateData.avatarUrl = updatedPayload.avatarUrl;
 
       await updateUserInFirestore(canonicalUid, updateData);
+      await syncUserLoginAliases({
+        authEmail: canonicalAuthEmail,
+        username: nextUsername,
+        phone: nextPhone,
+        oldUsername: existingUser?.username,
+        oldPhone: existingUser?.phone
+      });
     } catch (err) {
       console.warn('Failed to update user in Firestore:', err);
     }
@@ -1786,22 +1995,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     }
   };
 
-  const resetUsersToDefault = () => {
-    const existingAdmin = usersRef.current.find(u => u.role === 'amin_khedma_am');
-    const defaults = existingAdmin ? [existingAdmin] : [];
-    setUsers(defaults);
-    if (currentUserRef.current) {
-      const refreshed = defaults.find(u => u.username === currentUserRef.current?.username) || existingAdmin || null;
-      setCurrentUser(refreshed);
-    }
-  };
-
   const clearAllNonAdminUsers = async () => {
     const adminUser = usersRef.current.find(u => u.role === 'amin_khedma_am');
     const cleanedUsers = adminUser ? [adminUser] : [];
     setUsers(cleanedUsers);
     try {
-      await clearAllNonAdminUsersFromFirestore(adminUser?.id || 'admin');
+      await clearAllNonAdminUsersFromFirestore(adminUser?.id || '');
     } catch (err) {
       console.warn('Failed to clear non-admin users from Firestore:', err);
     }
@@ -2706,21 +2905,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
   };
 
   // ============================================================================
-  // Database Import/Export & Reset
+  // Database Import/Export & Full Clean Wipe
   // ============================================================================
-  const clearAllDatabase = () => {
+  const clearAllDatabase = async (): Promise<void> => {
+    const curr = currentUserRef.current;
+    if (!curr || curr.role !== 'amin_khedma_am' || curr.isAdminAssistant) {
+      throw new Error('هذه العملية مقتصرة فقط على حساب أمين الخدمة العام.');
+    }
+
+    const adminUser =
+      usersRef.current.find(u => u.role === 'amin_khedma_am' || u.isProtectedRoot) || curr;
+    const protectedAuthEmail =
+      adminUser?.authEmail ||
+      auth.currentUser?.email ||
+      formatSafeChurchEmail(adminUser.username || adminUser.id, 'stjohn.church');
+
+    await wipeAllDatabaseFromFirestore({
+      protectedRootUid: adminUser.id,
+      protectedAuthEmail
+    });
+
+    const currentTheme = theme;
+    const preservedUsers = adminUser ? [adminUser] : [];
+
     setChildren([]);
     setServants([]);
     setSupervisors([]);
     setAttendance([]);
     setNotifications([]);
     setBooks([]);
+    setStagesList([]);
+    setSeasonalEvents([]);
+    setPendingRegistrations([]);
+    setUsers(preservedUsers);
+    setActiveStageId('all');
+    setSelectedStageScopeState('all');
+
     localStorage.removeItem('church_app_children');
     localStorage.removeItem('church_app_servants');
     localStorage.removeItem('church_app_supervisors');
     localStorage.removeItem('church_app_attendance');
     localStorage.removeItem('church_app_notifications');
     localStorage.removeItem('church_app_books');
+    localStorage.removeItem('church_app_stages_list');
+    localStorage.removeItem('church_app_seasonal_events');
+    localStorage.setItem('church_app_theme', currentTheme);
+    localStorage.setItem('church_app_users', JSON.stringify(preservedUsers));
   };
 
   const exportDatabaseJSON = () => {
@@ -2758,28 +2988,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     } catch (e: any) {
       return { success: false, error: e.message || 'فشل قراءة ملف الـ JSON' };
     }
-  };
-
-  const resetToDefaultData = () => {
-    if (currentUserRef.current?.role !== 'amin_khedma_am') {
-      console.warn('Unauthorized resetToDefaultData blocked: requires amin_khedma_am role.');
-      return;
-    }
-    const currentTheme = theme;
-    const existingAdmin = usersRef.current.find(u => u.role === 'amin_khedma_am') || currentUserRef.current;
-    const preservedUsers = existingAdmin ? [existingAdmin] : [];
-    setStagesList(DEFAULT_STAGES);
-    setUsers(preservedUsers);
-    setCurrentUser(existingAdmin);
-    setNotifications([]);
-    setChildren([]);
-    setServants([]);
-    setSupervisors([]);
-    setBooks([]);
-    setAttendance([]);
-    localStorage.clear();
-    localStorage.setItem('church_app_theme', currentTheme);
-    localStorage.setItem('church_app_users', JSON.stringify(preservedUsers));
   };
 
   // ============================================================================
@@ -3021,13 +3229,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     }
   };
 
-  // Self Profile Update (Strictly single canonical UID doc, sanitized fields, supports avatarUrl)
+  // Self Profile Update (Strictly single canonical UID doc, sanitized fields, supports username + avatarUrl + alias sync)
   const updatePersonalProfile = async (profileData: Partial<AppUser>): Promise<void> => {
     const curr = currentUserRef.current;
     if (!curr) return;
 
+    let nextUsername = curr.username;
+    if (profileData.username !== undefined) {
+      const cleanNewUsername = profileData.username.trim().toLowerCase();
+      const validation = validateUsername(cleanNewUsername, usersRef.current, curr.id);
+      if (!validation.valid) {
+        throw new Error(validation.error || 'اسم المستخدم غير صالح');
+      }
+      nextUsername = cleanNewUsername;
+    }
+
+    const canonicalAuthEmail =
+      curr.authEmail ||
+      auth.currentUser?.email ||
+      formatSafeChurchEmail(curr.username || curr.id, 'stjohn.church');
+
     const updatedUser: AppUser = {
       ...curr,
+      username: nextUsername,
+      authEmail: canonicalAuthEmail,
       ...(profileData.name !== undefined ? { name: profileData.name } : {}),
       ...(profileData.phone !== undefined ? { phone: profileData.phone } : {}),
       ...(profileData.birthDate !== undefined ? { birthDate: profileData.birthDate } : {}),
@@ -3047,6 +3272,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     try {
       await setFirestoreUserWithMerge(curr.id, {
         uid: curr.id,
+        username: updatedUser.username,
+        authEmail: canonicalAuthEmail,
         fullName: updatedUser.name,
         phone: updatedUser.phone || '',
         birthDate: updatedUser.birthDate || '',
@@ -3054,6 +3281,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         job: updatedUser.job || 'خادم',
         area: updatedUser.area || '',
         avatarUrl: updatedUser.avatarUrl || ''
+      });
+      await syncUserLoginAliases({
+        authEmail: canonicalAuthEmail,
+        username: updatedUser.username,
+        phone: updatedUser.phone || '',
+        oldUsername: curr.username,
+        oldPhone: curr.phone
       });
     } catch (err) {
       console.warn('Failed to update personal profile in Firestore:', err);
@@ -3154,6 +3388,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         currentUser,
         users,
         pendingRegistrations,
+        isRootInitialized,
+        initializeRootAdmin,
         login,
         registerServant,
         approvePendingRegistration,
@@ -3164,7 +3400,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         updateUser,
         deleteUser,
         resetUserTempPassword,
-        resetUsersToDefault,
         clearAllNonAdminUsers,
         clearAllMakhdomeen,
         notifications,
@@ -3198,7 +3433,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         markAllAttendance,
         getAttendanceRecord,
         clearAllDatabase,
-        resetToDefaultData,
         unassignAllServantsFromClasses,
         moveServantsToGeneralDock,
         assignServantRole,

@@ -50,6 +50,7 @@ export interface AppUser {
   id: string;
   uid?: string;
   username: string;
+  authEmail?: string;
   name: string;
   fullName?: string;
   phone?: string;

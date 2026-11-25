@@ -3,7 +3,7 @@ import { useApp, TabId } from '../context/AppContext';
 import { 
   Home, BookOpen, Users, UserCheck, ShieldCheck, 
   CalendarCheck, Crown, Cake, LogOut, 
-  Settings, RotateCcw, X, ChevronLeft, Layers
+  Settings, X, ChevronLeft, Layers
 } from 'lucide-react';
 import { parseBirthDate } from './BirthdayWidget';
 import { ThemeToggle } from './ThemeToggle';
@@ -18,7 +18,6 @@ interface SidebarProps {
   onOpenProfile?: () => void;
   onOpenUserManagement: () => void;
   onOpenServicesManager: () => void;
-  onResetData: () => void;
 }
 
 interface NavItem {
@@ -35,11 +34,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenBirthdays,
   onOpenProfile,
   onOpenUserManagement,
-  onOpenServicesManager,
-  onResetData
+  onOpenServicesManager
 }) => {
   const { role, activeTab, setActiveTab, currentUser, logout, children, servants, selectedStageScope, activeStageName } = useApp();
-  const [showResetConfirm, setShowResetConfirm] = React.useState(false);
 
   // Compute today's birthdays count
   const today = new Date();
@@ -475,61 +472,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* PWA Install shortcut button */}
           <PWAInstallButton variant="sidebar" />
 
-          {/* Utility Row: Theme Switcher & Admin-Only Reset in a clean single strip */}
+          {/* Utility Row: Theme Switcher */}
           <div className="flex items-center justify-between pt-1 border-t border-[#260a16] text-[11px]">
             <ThemeToggle variant="full" />
-            {currentUser?.role === 'amin_khedma_am' && (
-              <button
-                onClick={() => setShowResetConfirm(true)}
-                className="p-1.5 rounded-lg text-stone-400 hover:text-stone-200 hover:bg-[#280e1a] transition-colors cursor-pointer"
-                title="استعادة البيانات الافتراضية"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-              </button>
-            )}
           </div>
         </div>
 
       </aside>
-
-      {/* In-App Reset Confirmation Modal */}
-      {showResetConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-[#1a0813] border border-stone-200 dark:border-[#421527] rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-950/60 flex items-center justify-center text-amber-600 shrink-0">
-                <RotateCcw className="w-6 h-6" />
-              </div>
-              <div>
-                <h4 className="text-base font-bold text-stone-900 dark:text-stone-100">استعادة البيانات الأصلية</h4>
-                <p className="text-xs text-stone-500 dark:text-stone-400">إعادة ضبط المصنع للمنظومة</p>
-              </div>
-            </div>
-
-            <p className="text-sm text-stone-700 dark:text-stone-300 bg-amber-50/50 dark:bg-amber-950/30 p-3.5 rounded-2xl border border-amber-100 dark:border-amber-900/40">
-              هل ترغب في استعادة البيانات الأصلية للكنيسة؟ سيتم إعادة تحميل المراحل والبيانات الافتراضية.
-            </p>
-
-            <div className="flex items-center gap-3 pt-2">
-              <button
-                onClick={() => {
-                  setShowResetConfirm(false);
-                  onResetData();
-                }}
-                className="flex-1 py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-sm"
-              >
-                تأكيد الاستعادة
-              </button>
-              <button
-                onClick={() => setShowResetConfirm(false)}
-                className="py-2.5 px-4 rounded-xl bg-stone-100 dark:bg-[#250c1b] text-stone-700 dark:text-stone-300 hover:bg-stone-200 text-xs font-bold transition-colors cursor-pointer"
-              >
-                إلغاء
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 };

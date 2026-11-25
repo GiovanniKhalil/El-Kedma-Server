@@ -164,7 +164,7 @@ export async function verifyPassword(inputPlainPass: string, storedHashOrPlain?:
     return false;
   }
 
-  // 2. Backward compatibility with plain text (e.g. '123' or 'temp123' in mockData)
+  // 2. Fallback comparison if a record contains an unhashed legacy value
   return storedHashOrPlain === inputPlainPass;
 }
 

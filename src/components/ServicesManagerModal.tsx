@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { 
   X, Layers, Plus, Trash2, ShieldCheck, CheckCircle2, AlertCircle, 
-  Sparkles, Database, Users, Download, Upload, AlertTriangle, RefreshCw, Edit3,
+  Sparkles, Database, Users, Download, Upload, AlertTriangle, Edit3,
   UserX, ArrowUpRight, Check, Info
 } from 'lucide-react';
 import { getStageBadgeClass } from '../utils/themeColors';
@@ -19,7 +19,7 @@ export const ServicesManagerModal: React.FC<ServicesManagerModalProps> = ({ isOp
   const { 
     stagesList, addStage, deleteStage, currentUser, role,
     unassignAllServantsFromClasses, promoteAllStages,
-    clearAllDatabase, resetToDefaultData, exportDatabaseJSON, importDatabaseJSON,
+    clearAllDatabase, exportDatabaseJSON, importDatabaseJSON,
     children, servants, supervisors, books, attendance,
     assignServantRole
   } = useApp();
@@ -34,7 +34,6 @@ export const ServicesManagerModal: React.FC<ServicesManagerModalProps> = ({ isOp
   const [newSupervisorServantId, setNewSupervisorServantId] = useState('');
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   // Operations confirmation dialog states
   const [showUnassignConfirm, setShowUnassignConfirm] = useState(false);
@@ -48,6 +47,7 @@ export const ServicesManagerModal: React.FC<ServicesManagerModalProps> = ({ isOp
   // Clear Database confirmation state
   const [confirmClearText, setConfirmClearText] = useState('');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [isClearingDatabase, setIsClearingDatabase] = useState(false);
 
   // Import JSON state
   const [importStatus, setImportStatus] = useState<string | null>(null);
@@ -138,13 +138,21 @@ export const ServicesManagerModal: React.FC<ServicesManagerModalProps> = ({ isOp
     });
   };
 
-  const handleClearAllConfirmed = () => {
-    if (confirmClearText.trim() === 'مسح الكل') {
-      clearAllDatabase();
+  const handleClearAllConfirmed = async () => {
+    if (confirmClearText.trim() !== 'مسح الكل') return;
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    setIsClearingDatabase(true);
+    try {
+      await clearAllDatabase();
       setShowClearConfirm(false);
       setConfirmClearText('');
-      setSuccessMsg('تم مسح وتصفير قاعدة البيانات بالكامل مع الإبقاء على حسابك للدخول.');
+      setSuccessMsg('تم تصفير وتنظيف قاعدة البيانات السحابية بالكامل مع الحفاظ على حساب أمين الخدمة العام فقط.');
       setTimeout(() => setSuccessMsg(null), 5000);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'حدث خطأ أثناء تصفير قاعدة البيانات.');
+    } finally {
+      setIsClearingDatabase(false);
     }
   };
 
@@ -663,92 +671,61 @@ export const ServicesManagerModal: React.FC<ServicesManagerModalProps> = ({ isOp
                 </div>
               </div>
 
-              {/* Danger Zone: Clear All Database (Exclusive to Admin) */}
-              <div className="p-4 rounded-2xl bg-rose-50/70 dark:bg-rose-950/30 border-2 border-rose-300 dark:border-rose-900/60 space-y-3">
-                <div className="flex items-center gap-2 text-xs font-black text-rose-900 dark:text-rose-300">
-                  <AlertTriangle className="w-5 h-5 text-rose-600" />
-                  <span>منطقة تحكم حذرة: مسح وتصفير قاعدة البيانات بالكامل</span>
-                </div>
-                
-                <p className="text-xs text-rose-800 dark:text-rose-300 leading-relaxed">
-                  هذا الخيار يمسح جميع الأولاد والخدام وسجلات الحضور من المتصفح بالكامل، مع الحفاظ فقط على حسابك للدخول.
-                </p>
+              {/* Danger Zone: Full Firestore Wipe (Strictly Exclusive to Protected Root Amin El-Khedma El-Am) */}
+              {currentUser?.role === 'amin_khedma_am' && !currentUser?.isAdminAssistant && (
+                <div className="p-4 rounded-2xl bg-rose-50/70 dark:bg-rose-950/30 border-2 border-rose-300 dark:border-rose-900/60 space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-black text-rose-900 dark:text-rose-300">
+                    <AlertTriangle className="w-5 h-5 text-rose-600" />
+                    <span>منطقة تحكم حذرة: تصفير وتنظيف قاعدة البيانات بالكامل</span>
+                  </div>
 
-                {!showClearConfirm ? (
-                  <button
-                    onClick={() => setShowClearConfirm(true)}
-                    className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-2 cursor-pointer shadow-md transition-all active:scale-95"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    <span>بدء إجراء مسح كل البيانات</span>
-                  </button>
-                ) : (
-                  <div className="p-3 bg-white dark:bg-[#1a070e] rounded-xl border border-rose-400 space-y-2.5">
-                    <p className="text-[11px] font-bold text-rose-700 dark:text-rose-300">
-                      للتأكيد النهائي، اكتب بالأسفل كلمة <span className="underline font-black text-rose-900 dark:text-rose-100">مسح الكل</span>:
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <input 
-                        type="text"
-                        value={confirmClearText}
-                        onChange={(e) => setConfirmClearText(e.target.value)}
-                        placeholder="مسح الكل"
-                        className="bg-stone-50 dark:bg-[#280c18] border border-rose-300 dark:border-rose-800 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-900 dark:text-stone-100 focus:outline-none focus:ring-1 focus:ring-rose-500"
-                      />
-                      <button
-                        onClick={handleClearAllConfirmed}
-                        disabled={confirmClearText.trim() !== 'مسح الكل'}
-                        className="px-4 py-1.5 bg-rose-700 disabled:opacity-40 text-white rounded-lg text-xs font-black cursor-pointer disabled:cursor-not-allowed"
-                      >
-                        تأكيد المسح الكلي
-                      </button>
-                      <button
-                        onClick={() => {
-                          setShowClearConfirm(false);
-                          setConfirmClearText('');
-                        }}
-                        className="px-3 py-1.5 bg-stone-200 dark:bg-[#341121] text-slate-700 dark:text-stone-300 rounded-lg text-xs font-bold cursor-pointer"
-                      >
-                        إلغاء
-                      </button>
+                  <p className="text-xs text-rose-800 dark:text-rose-300 leading-relaxed">
+                    هذا الإجراء يمسح جميع المخدومين والخدام والمراحل وسجلات الحضور والمكتبة والإشعارات والمناسبات وطلبات التسجيل من السحابة (Firestore) بالكامل، مع الحفاظ فقط على حساب أمين الخدمة العام المحمي للدخول.
+                  </p>
+
+                  {!showClearConfirm ? (
+                    <button
+                      onClick={() => setShowClearConfirm(true)}
+                      className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-2 cursor-pointer shadow-md transition-all active:scale-95"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      <span>تصفير وتنظيف قاعدة البيانات بالكامل</span>
+                    </button>
+                  ) : (
+                    <div className="p-3 bg-white dark:bg-[#1a070e] rounded-xl border border-rose-400 space-y-2.5">
+                      <p className="text-[11px] font-bold text-rose-700 dark:text-rose-300">
+                        للتأكيد النهائي، اكتب بالأسفل كلمة <span className="underline font-black text-rose-900 dark:text-rose-100">مسح الكل</span>:
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          type="text"
+                          value={confirmClearText}
+                          onChange={(e) => setConfirmClearText(e.target.value)}
+                          placeholder="مسح الكل"
+                          className="bg-stone-50 dark:bg-[#280c18] border border-rose-300 dark:border-rose-800 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-900 dark:text-stone-100 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                        />
+                        <button
+                          onClick={handleClearAllConfirmed}
+                          disabled={confirmClearText.trim() !== 'مسح الكل' || isClearingDatabase}
+                          className="px-4 py-1.5 bg-rose-700 disabled:opacity-40 text-white rounded-lg text-xs font-black cursor-pointer disabled:cursor-not-allowed"
+                        >
+                          {isClearingDatabase ? 'جاري التصفير...' : 'تأكيد التصفير الكلي'}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowClearConfirm(false);
+                            setConfirmClearText('');
+                          }}
+                          disabled={isClearingDatabase}
+                          className="px-3 py-1.5 bg-stone-200 dark:bg-[#341121] text-slate-700 dark:text-stone-300 rounded-lg text-xs font-bold cursor-pointer"
+                        >
+                          إلغاء
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Reset to Default Seed Data */}
-              <div className="pt-2 flex items-center justify-between text-xs text-slate-500 dark:text-stone-400 border-t border-amber-100 dark:border-[#381622]">
-                <span>تريد استرجاع النماذج الأولية للتجربة؟</span>
-                {showResetConfirm ? (
-                  <div className="flex items-center gap-2 bg-amber-50 dark:bg-[#2e1320] p-1.5 rounded-xl border border-amber-300 dark:border-amber-800">
-                    <span className="text-amber-800 dark:text-churchgold-300 font-bold text-xs">تأكيد الاستعادة؟</span>
-                    <button
-                      onClick={() => {
-                        resetToDefaultData();
-                        setSuccessMsg('تمت استعادة البيانات الافتراضية بنجاح.');
-                        setShowResetConfirm(false);
-                      }}
-                      className="px-2 py-0.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition-colors cursor-pointer"
-                    >
-                      نعم
-                    </button>
-                    <button
-                      onClick={() => setShowResetConfirm(false)}
-                      className="px-2 py-0.5 rounded-lg bg-stone-200 dark:bg-stone-800 text-stone-700 dark:text-stone-300 font-bold text-xs transition-colors cursor-pointer"
-                    >
-                      إلغاء
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setShowResetConfirm(true)}
-                    className="flex items-center gap-1.5 text-burgundy-800 dark:text-churchgold-400 hover:underline font-bold cursor-pointer"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>استعادة البيانات الافتراضية</span>
-                  </button>
-                )}
-              </div>
+                  )}
+                </div>
+              )}
 
             </div>
           )}

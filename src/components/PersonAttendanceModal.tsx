@@ -20,7 +20,7 @@ export const PersonAttendanceModal: React.FC<PersonAttendanceModalProps> = ({
   person,
   targetType
 }) => {
-  const { attendance } = useApp();
+  const { attendance, seasonalEvents } = useApp();
 
   if (!isOpen || !person) return null;
 
@@ -28,10 +28,12 @@ export const PersonAttendanceModal: React.FC<PersonAttendanceModalProps> = ({
     switch (type) {
       case 'mass': return 'القداس الإلهي';
       case 'sunday_school': return 'مدارس الأحد';
-      case 'festival': return 'المهرجان';
       case 'general_meeting': return 'اجتماع الخدمة العام';
       case 'supervisors_meeting': return 'اجتماع الأمناء';
-      default: return 'نشاط كنسي';
+      default: {
+        const seasonal = seasonalEvents.find(ev => ev.id === type);
+        return seasonal ? seasonal.name : 'مناسبة / نشاط كنسي';
+      }
     }
   };
 
@@ -39,10 +41,9 @@ export const PersonAttendanceModal: React.FC<PersonAttendanceModalProps> = ({
     switch (type) {
       case 'mass': return Church;
       case 'sunday_school': return BookOpen;
-      case 'festival': return Sparkles;
       case 'general_meeting': return Users;
       case 'supervisors_meeting': return Crown;
-      default: return Calendar;
+      default: return seasonalEvents.some(ev => ev.id === type) ? Sparkles : Calendar;
     }
   };
 

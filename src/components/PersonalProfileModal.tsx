@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { AREAS } from '../data/mockData';
 import { compressAvatarImage, isSafeImageUrl } from '../utils/imageHelper';
+import { validateUsername } from '../utils/cryptoUtils';
 
 interface PersonalProfileModalProps {
   isOpen: boolean;
@@ -13,12 +14,13 @@ interface PersonalProfileModalProps {
 }
 
 export const PersonalProfileModal: React.FC<PersonalProfileModalProps> = ({ isOpen, onClose }) => {
-  const { currentUser, updatePersonalProfile, changePassword } = useApp();
+  const { currentUser, users, updatePersonalProfile, changePassword } = useApp();
 
   const [activeTab, setActiveTab] = useState<'info' | 'password'>('info');
 
   // Form Fields
   const [name, setName] = useState(currentUser?.name || '');
+  const [username, setUsername] = useState(currentUser?.username || '');
   const [phone, setPhone] = useState(currentUser?.phone || '');
   const [birthDate, setBirthDate] = useState(currentUser?.birthDate || '1995-01-01');
   const [notes, setNotes] = useState(currentUser?.notes || '');
@@ -35,6 +37,7 @@ export const PersonalProfileModal: React.FC<PersonalProfileModalProps> = ({ isOp
   useEffect(() => {
     if (isOpen && currentUser) {
       setName(currentUser.name || '');
+      setUsername(currentUser.username || '');
       setPhone(currentUser.phone || '');
       setBirthDate(currentUser.birthDate || '1995-01-01');
       setNotes(currentUser.notes || '');
@@ -70,10 +73,18 @@ export const PersonalProfileModal: React.FC<PersonalProfileModalProps> = ({ isOp
       return;
     }
 
+    const cleanUsername = username.trim().toLowerCase();
+    const usernameCheck = validateUsername(cleanUsername, users, currentUser.id);
+    if (!usernameCheck.valid) {
+      setErrorMsg(usernameCheck.error || 'اسم المستخدم غير صالح');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       await updatePersonalProfile({
         name: name.trim(),
+        username: cleanUsername,
         phone: phone.trim(),
         birthDate,
         notes: notes.trim(),
@@ -252,19 +263,38 @@ export const PersonalProfileModal: React.FC<PersonalProfileModalProps> = ({ isOp
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs sm:text-sm font-black text-slate-950 dark:text-stone-100 mb-1.5">
-                الاسم الكامل *
-              </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-white dark:bg-[#200b14] border-2 border-stone-300 dark:border-[#521c32] focus:border-burgundy-700 dark:focus:border-churchgold-400 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-black text-slate-950 dark:text-white focus:outline-none focus:ring-2 focus:ring-burgundy-600/20 transition-all"
-                />
-                <User className="w-4 h-4 text-churchgold-600 dark:text-churchgold-400 absolute left-3.5 top-3" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div>
+                <label className="block text-xs sm:text-sm font-black text-slate-950 dark:text-stone-100 mb-1.5">
+                  الاسم الكامل *
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full bg-white dark:bg-[#200b14] border-2 border-stone-300 dark:border-[#521c32] focus:border-burgundy-700 dark:focus:border-churchgold-400 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-black text-slate-950 dark:text-white focus:outline-none focus:ring-2 focus:ring-burgundy-600/20 transition-all"
+                  />
+                  <User className="w-4 h-4 text-churchgold-600 dark:text-churchgold-400 absolute left-3.5 top-3" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs sm:text-sm font-black text-slate-950 dark:text-stone-100 mb-1.5">
+                  اسم المستخدم للدخول (Username) *
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value.replace(/\s+/g, ''))}
+                    className="w-full bg-white dark:bg-[#200b14] border-2 border-stone-300 dark:border-[#521c32] focus:border-burgundy-700 dark:focus:border-churchgold-400 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-mono font-black text-slate-950 dark:text-white focus:outline-none focus:ring-2 focus:ring-burgundy-600/20 transition-all"
+                    dir="ltr"
+                  />
+                  <ShieldCheck className="w-4 h-4 text-churchgold-600 dark:text-churchgold-400 absolute left-3.5 top-3" />
+                </div>
               </div>
             </div>
 

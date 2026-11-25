@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { 
   Lock, User, KeyRound, ShieldCheck, CheckCircle2, AlertCircle, ArrowRight, 
@@ -11,10 +11,28 @@ import { AREAS } from '../data/mockData';
 import { validateUsername } from '../utils/cryptoUtils';
 
 export const LoginPage: React.FC = () => {
-  const { login, registerServant, changePassword, currentUser, stagesList, users } = useApp();
+  const {
+    login,
+    registerServant,
+    changePassword,
+    currentUser,
+    stagesList,
+    users,
+    isRootInitialized,
+    initializeRootAdmin
+  } = useApp();
 
-  // Mode: Default to 'register' per requirement (first open opens on registration page)
-  const [authMode, setAuthMode] = useState<'register' | 'login'>('register');
+  // Mode: Opens 'bootstrap' when root admin has never been initialized; otherwise opens 'register' / 'login'
+  const [authMode, setAuthMode] = useState<'register' | 'login' | 'bootstrap'>('register');
+  const hasManualSwitchRef = useRef(false);
+
+  useEffect(() => {
+    if (isRootInitialized === false && !hasManualSwitchRef.current) {
+      setAuthMode('bootstrap');
+    } else if (isRootInitialized === true && authMode === 'bootstrap') {
+      setAuthMode('login');
+    }
+  }, [isRootInitialized, authMode]);
 
   // Login Form State
   const [username, setUsername] = useState('');
@@ -45,6 +63,57 @@ export const LoginPage: React.FC = () => {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingSuccessMessage, setPendingSuccessMessage] = useState<string | null>(null);
+
+  // Root Bootstrap Form State (Seed-Once when /users is empty)
+  const [rootName, setRootName] = useState('');
+  const [rootUsername, setRootUsername] = useState('');
+  const [rootPhone, setRootPhone] = useState('');
+  const [rootPassword, setRootPassword] = useState('');
+  const [rootConfirmPassword, setRootConfirmPassword] = useState('');
+
+  const handleRootBootstrapSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    if (!rootName.trim()) {
+      setError('يرجى إدخال اسم أمين الخدمة العام بالكامل');
+      return;
+    }
+    const usernameCheck = validateUsername(rootUsername, []);
+    if (!usernameCheck.valid) {
+      setError(usernameCheck.error || 'اسم المستخدم غير صالح');
+      return;
+    }
+    if (!rootPhone.trim() || rootPhone.trim().length < 6) {
+      setError('يرجى إدخال رقم هاتف صحيح (6 أرقام على الأقل)');
+      return;
+    }
+    if (!rootPassword.trim() || rootPassword.trim().length < 4) {
+      setError('كلمة السر يجب ألا تقل عن 4 خانات');
+      return;
+    }
+    if (rootPassword !== rootConfirmPassword) {
+      setError('كلمتا السر غير متطابقتين');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await initializeRootAdmin({
+        name: rootName.trim(),
+        username: rootUsername.trim(),
+        phone: rootPhone.trim(),
+        password: rootPassword.trim()
+      });
+      if (!res.success) {
+        setError(res.error || 'تعذر تهيئة حساب أمين الخدمة العام');
+      }
+    } catch (err: any) {
+      setError(err?.message || 'حدث خطأ أثناء تهيئة الحساب');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   // Handle Registration
   const handleRegisterSubmit = async (e: React.FormEvent) => {
@@ -238,12 +307,33 @@ export const LoginPage: React.FC = () => {
           </p>
         </div>
 
-        {/* Main Auth Toggle (Register vs Login) */}
+        {/* Main Auth Toggle */}
         {!isChangingTempPass && !isForgotPass && (
           <div className="flex items-center p-1 bg-stone-100 dark:bg-[#220a16] rounded-2xl border border-stone-200 dark:border-[#381120] mb-5">
+            {isRootInitialized === false && (
+              <button
+                type="button"
+                onClick={() => {
+                  hasManualSwitchRef.current = true;
+                  setAuthMode('bootstrap');
+                  setError(null);
+                  setPendingSuccessMessage(null);
+                }}
+                className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  authMode === 'bootstrap'
+                    ? 'bg-gradient-to-r from-amber-600 to-churchgold-600 text-burgundy-950 shadow-md border border-churchgold-400/60'
+                    : 'text-slate-700 dark:text-stone-300 hover:text-burgundy-900 dark:hover:text-white'
+                }`}
+              >
+                <Crown className="w-4 h-4" />
+                <span>تهيئة الأمين العام</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => {
+                hasManualSwitchRef.current = true;
                 setAuthMode('register');
                 setError(null);
                 setPendingSuccessMessage(null);
@@ -261,6 +351,7 @@ export const LoginPage: React.FC = () => {
             <button
               type="button"
               onClick={() => {
+                hasManualSwitchRef.current = true;
                 setAuthMode('login');
                 setError(null);
                 setPendingSuccessMessage(null);
@@ -283,6 +374,8 @@ export const LoginPage: React.FC = () => {
                 ? 'تغيير كلمة السر المؤقتة 🔑' 
                 : isForgotPass 
                 ? 'استرجاع كلمة السر 🔒' 
+                : authMode === 'bootstrap'
+                ? 'تهيئة حساب أمين الخدمة العام لأول مرة 👑'
                 : authMode === 'register' 
                 ? 'تسجيل بيانات خادم جديد 👋' 
                 : 'تسجيل الدخول للخدمة ✨'}
@@ -292,6 +385,8 @@ export const LoginPage: React.FC = () => {
                 ? 'أدخل كلمة سر جديدة لحسابك المرة الأولى' 
                 : isForgotPass 
                 ? 'اكتب اسم حسابك أو رقم هاتفك لتحديد كلمة سر جديدة' 
+                : authMode === 'bootstrap'
+                ? 'قاعدة البيانات فارغة تماماً الآن — أنشئ حساب أمين الخدمة العام المحمي لمرة واحدة لتأسيس الخدمة'
                 : authMode === 'register'
                 ? 'سجل بياناتك الشخصية كخادم للبدء فوراً (يتم تسكين الخدمة بواسطة أمين الخدمة العام)'
                 : 'أدخل اسم المستخدم أو رقم الهاتف وكلمة السر المعتمدة'}
@@ -458,6 +553,109 @@ export const LoginPage: React.FC = () => {
                   </button>
                 </div>
               )}
+            </form>
+          ) : authMode === 'bootstrap' ? (
+            /* VIEW 2B: First-Time Seed-Once Root Admin Setup */
+            <form onSubmit={handleRootBootstrapSubmit} className="space-y-3.5 text-xs font-medium text-slate-800">
+              <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-[#2a121c] border border-amber-300 dark:border-churchgold-600/40 text-amber-950 dark:text-churchgold-200 space-y-1">
+                <div className="font-black flex items-center gap-1.5 text-xs">
+                  <Crown className="w-4 h-4 text-churchgold-600 dark:text-churchgold-400" />
+                  <span>التأسيس الأولي لمنظومة الخدمة (مرة واحدة فقط)</span>
+                </div>
+                <p className="text-[11px] text-amber-900 dark:text-stone-300 leading-relaxed">
+                  يُنشأ هذا الحساب المحمي مرة واحدة فقط عند بداية تشغيل القاعدة، ويمكنك لاحقاً تعديل الاسم، اسم المستخدم، الهاتف، الصورة، أو كلمة المرور بحرية من داخل ملفك الشخصي.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs sm:text-sm font-black mb-1 text-slate-950 dark:text-stone-100">اسم أمين الخدمة العام *</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      required
+                      value={rootName}
+                      onChange={(e) => setRootName(e.target.value)}
+                      placeholder="الاسم الرباعي بالكامل"
+                      className="w-full bg-white dark:bg-[#250d18] border-2 border-amber-300 dark:border-[#4d1d2c] rounded-xl pr-3 pl-9 py-2.5 text-xs sm:text-sm font-bold text-slate-950 dark:text-stone-100 focus:outline-none focus:border-burgundy-700"
+                    />
+                    <Crown className="w-4 h-4 text-churchgold-600 dark:text-churchgold-400 absolute left-3 top-3" />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs sm:text-sm font-black mb-1 text-slate-950 dark:text-stone-100">اسم المستخدم للدخول *</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      required
+                      value={rootUsername}
+                      onChange={(e) => setRootUsername(e.target.value.replace(/\s+/g, ''))}
+                      placeholder="مثال: bishoy.gerges"
+                      className="w-full bg-white dark:bg-[#250d18] border-2 border-amber-300 dark:border-[#4d1d2c] rounded-xl pr-3 pl-9 py-2.5 text-xs sm:text-sm font-mono font-bold text-slate-950 dark:text-stone-100 focus:outline-none focus:border-burgundy-700"
+                      dir="ltr"
+                    />
+                    <ShieldCheck className="w-4 h-4 text-churchgold-600 dark:text-churchgold-400 absolute left-3 top-3" />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs sm:text-sm font-black mb-1 text-slate-950 dark:text-stone-100">رقم الهاتف / الواتساب *</label>
+                <div className="relative">
+                  <input
+                    type="tel"
+                    required
+                    value={rootPhone}
+                    onChange={(e) => setRootPhone(e.target.value)}
+                    placeholder="01xxxxxxxxx"
+                    className="w-full bg-white dark:bg-[#250d18] border-2 border-amber-300 dark:border-[#4d1d2c] rounded-xl pr-3 pl-9 py-2.5 text-xs sm:text-sm font-mono font-bold text-slate-950 dark:text-stone-100 focus:outline-none focus:border-burgundy-700"
+                    dir="ltr"
+                  />
+                  <Phone className="w-4 h-4 text-churchgold-600 dark:text-churchgold-400 absolute left-3 top-3" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs sm:text-sm font-black mb-1 text-slate-950 dark:text-stone-100">كلمة السر *</label>
+                  <div className="relative">
+                    <input
+                      type="password"
+                      required
+                      value={rootPassword}
+                      onChange={(e) => setRootPassword(e.target.value)}
+                      placeholder="اختر كلمة سر قوية"
+                      className="w-full bg-white dark:bg-[#250d18] border-2 border-amber-300 dark:border-[#4d1d2c] rounded-xl pr-3 pl-9 py-2.5 text-xs sm:text-sm font-bold text-slate-950 dark:text-stone-100 focus:outline-none focus:border-burgundy-700"
+                    />
+                    <Lock className="w-4 h-4 text-churchgold-600 dark:text-churchgold-400 absolute left-3 top-3" />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs sm:text-sm font-black mb-1 text-slate-950 dark:text-stone-100">تأكيد كلمة السر *</label>
+                  <div className="relative">
+                    <input
+                      type="password"
+                      required
+                      value={rootConfirmPassword}
+                      onChange={(e) => setRootConfirmPassword(e.target.value)}
+                      placeholder="أعد كتابة كلمة السر"
+                      className="w-full bg-white dark:bg-[#250d18] border-2 border-amber-300 dark:border-[#4d1d2c] rounded-xl pr-3 pl-9 py-2.5 text-xs sm:text-sm font-bold text-slate-950 dark:text-stone-100 focus:outline-none focus:border-burgundy-700"
+                    />
+                    <KeyRound className="w-4 h-4 text-churchgold-600 dark:text-churchgold-400 absolute left-3 top-3" />
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full py-3.5 bg-gradient-to-r from-amber-600 via-churchgold-500 to-amber-600 hover:from-amber-700 hover:to-churchgold-600 text-burgundy-950 font-black rounded-xl shadow-md transition-all text-sm sm:text-base flex items-center justify-center gap-2 cursor-pointer mt-2 disabled:opacity-60"
+              >
+                <Crown className="w-5 h-5" />
+                <span>{isSubmitting ? 'جاري التأسيس...' : 'إنشاء حساب أمين الخدمة العام والدخول'}</span>
+              </button>
             </form>
           ) : authMode === 'register' ? (
             /* VIEW 3: Registration Form (DEFAULT ON APP OPEN) */

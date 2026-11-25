@@ -22,7 +22,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
   initialMonth = new Date().getMonth() + 1,
   initialEvent = 'sunday_school'
 }) => {
-  const { children, attendance, stagesList, currentUser } = useApp();
+  const { children, attendance, stagesList, seasonalEvents, currentUser } = useApp();
   const [selectedStage, setSelectedStage] = useState(initialStage);
   const [selectedMonth, setSelectedMonth] = useState(initialMonth);
   const [selectedEvent, setSelectedEvent] = useState<EventType>(initialEvent);
@@ -149,7 +149,9 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                   >
                     <option value="sunday_school">مدارس الأحد</option>
                     <option value="mass">القداس الإلهي</option>
-                    <option value="mahragan">مهرجان الكرازة</option>
+                    {seasonalEvents.map(ev => (
+                      <option key={ev.id} value={ev.id}>{ev.name}</option>
+                    ))}
                   </select>
                 </div>
               </>
@@ -190,7 +192,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
               <h2 className="text-base font-black text-stone-900">
                 {type === 'directory' 
                   ? `كشف مخدومي مرحلة (${selectedStage === 'all' ? 'جميع المراحل' : selectedStage}) - إجمالي: ${scopedChildren.length} ولد`
-                  : `سجل حضور ${EVENT_LABELS[selectedEvent]} لـ ${monthLabel} (${selectedStage === 'all' ? 'كافة المراحل' : selectedStage})`
+                  : `سجل حضور ${EVENT_LABELS[selectedEvent] || seasonalEvents.find(ev => ev.id === selectedEvent)?.name || selectedEvent} لـ ${monthLabel} (${selectedStage === 'all' ? 'كافة المراحل' : selectedStage})`
                 }
               </h2>
             </div>

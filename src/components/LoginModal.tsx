@@ -323,7 +323,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
                     required
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder="مثال: admin أو mina_amin"
+                    placeholder="مثال: bishoy.amin أو mina_amin"
                     className="w-full bg-slate-50 dark:bg-[#250d18] border border-amber-200/80 dark:border-[#4d1d2c] rounded-xl pr-3 pl-9 py-2.5 text-sm font-semibold text-slate-900 dark:text-stone-100 placeholder-slate-400 dark:placeholder-stone-500 focus:outline-none focus:ring-2 focus:ring-burgundy-600/30 focus:border-burgundy-600"
                   />
                   <User className="w-4 h-4 text-stone-400 absolute left-3 top-3" />

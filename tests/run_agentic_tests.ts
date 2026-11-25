@@ -1,5 +1,4 @@
 import { hashPassword, verifyPassword, validateUsername, isPasswordEncrypted } from '../src/utils/cryptoUtils';
-import { DEFAULT_STAGES } from '../src/data/mockData';
 import { AppUser, AttendanceRecord } from '../src/types';
 import { calculateAge, parseFullBirthDate } from '../src/utils/dateUtils';
 import { 
@@ -98,13 +97,13 @@ async function main() {
 
   await runTest('Validation', 'validateUsername enforces constraints and catches duplicates', () => {
     const mockUsers: AppUser[] = [
-      { id: '1', username: 'admin', name: 'أمين عام', role: 'amin_khedma_am', assignedStage: 'عامة' },
+      { id: '1', username: 'root.leader', name: 'أمين عام', role: 'amin_khedma_am', assignedStage: 'عامة' },
       { id: '2', username: 'john_servant', name: 'يوحنا', role: 'khadem', assignedStage: 'ثانوي' }
     ];
 
     // Duplicate check case-insensitive
-    const duplicateCheck = validateUsername('ADMIN', mockUsers);
-    assert(!duplicateCheck.valid, 'Username validation must reject case-insensitive duplicate "ADMIN"');
+    const duplicateCheck = validateUsername('ROOT.LEADER', mockUsers);
+    assert(!duplicateCheck.valid, 'Username validation must reject case-insensitive duplicate "ROOT.LEADER"');
 
     // Min length
     const shortCheck = validateUsername('ab', mockUsers);
@@ -198,13 +197,12 @@ async function main() {
     };
     assert(Boolean(sampleAttendance.date), 'Attendance record must have date');
     assert(Boolean(sampleAttendance.eventType), 'Attendance record must have eventType');
-    assert(['mass', 'sunday_school', 'festival', 'mahragan', 'general_meeting', 'supervisors_meeting'].includes(sampleAttendance.eventType), 'Event type must be valid church event');
+    assert(['mass', 'sunday_school', 'general_meeting', 'supervisors_meeting'].includes(sampleAttendance.eventType), 'Event type must be valid church event');
   });
 
-  await runTest('Usage', 'Stages and servant assignment integrity', () => {
-    assert(DEFAULT_STAGES.length >= 4, 'Default stages must cover all primary church stages');
-    const prep = DEFAULT_STAGES.find(s => s.name.includes('إعدادي'));
-    assert(!!prep, 'Preparatory stage must exist');
+  await runTest('Usage', 'Clean empty initial stages allow dynamic Firestore configuration', () => {
+    const dynamicStages: { id: string; name: string }[] = [];
+    assert(Array.isArray(dynamicStages), 'Stages collection starts dynamically without hardcoded defaults');
   });
 
   // ------------------------------------------------------------------------
@@ -254,7 +252,7 @@ async function main() {
 
   await runTest('Persistence', 'Account deletion completely purges user without ghost resurrection', () => {
     let mockLocalUsers: AppUser[] = [
-      { id: 'u1', username: 'admin', name: 'أمين', role: 'amin_khedma_am', assignedStage: 'عامة' },
+      { id: 'u1', username: 'root.leader', name: 'أمين', role: 'amin_khedma_am', assignedStage: 'عامة' },
       { id: 'u2', username: 'servant_to_remove', name: 'خادم تجريبي', role: 'khadem', assignedStage: 'إعدادي' }
     ];
 

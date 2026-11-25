@@ -21,12 +21,11 @@ import { ServicesManagerModal } from './components/ServicesManagerModal';
 import { PWAInstallBanner } from './components/PWAInstallBanner';
 import { PersonalProfileModal } from './components/PersonalProfileModal';
 import { Child, Servant, Supervisor, Book } from './types';
-import { RotateCcw, Cross } from 'lucide-react';
 
 function AppContent() {
   const { 
     currentUser, role, activeTab, setActiveTab, addChild, updateChild, addServant, updateServant, 
-    addSupervisor, updateSupervisor, addBook, updateBook, resetToDefaultData 
+    addSupervisor, updateSupervisor, addBook, updateBook 
   } = useApp();
 
   // Mobile sidebar drawer state
@@ -49,7 +48,6 @@ function AppContent() {
   const [userManagementOpen, setUserManagementOpen] = useState(false);
   const [servicesManagerOpen, setServicesManagerOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
-  const [showFooterResetConfirm, setShowFooterResetConfirm] = useState(false);
 
   // RBAC Guard: Protect routes and tabs based on role
   useEffect(() => {
@@ -173,7 +171,6 @@ function AppContent() {
         onOpenProfile={() => setProfileModalOpen(true)}
         onOpenUserManagement={() => setUserManagementOpen(true)}
         onOpenServicesManager={() => setServicesManagerOpen(true)}
-        onResetData={() => resetToDefaultData()}
       />
 
       {/* Main Content Area */}
@@ -257,19 +254,6 @@ function AppContent() {
               />
               <span>كنيسة ماريوحنا المعمدان بالمعراج - مطرانية المعادي للأقباط الأرثوذكس</span>
             </div>
-
-            <div className="flex items-center gap-4">
-              {currentUser?.role === 'amin_khedma_am' && (
-                <button
-                  onClick={() => setShowFooterResetConfirm(true)}
-                  className="inline-flex items-center gap-1 text-stone-400 hover:text-burgundy-700 dark:hover:text-churchgold-300 font-bold transition-colors cursor-pointer"
-                  title="إعادة ضبط البيانات للأصل"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>استعادة البيانات الافتراضية</span>
-                </button>
-              )}
-            </div>
           </div>
         </footer>
 
@@ -316,45 +300,6 @@ function AppContent() {
         isOpen={profileModalOpen}
         onClose={() => setProfileModalOpen(false)}
       />
-
-      {/* In-App Footer Reset Confirmation Modal */}
-      {showFooterResetConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-[#1a0813] border border-stone-200 dark:border-[#421527] rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-950/60 flex items-center justify-center text-amber-600 shrink-0">
-                <RotateCcw className="w-6 h-6" />
-              </div>
-              <div>
-                <h4 className="text-base font-bold text-stone-900 dark:text-stone-100">استعادة البيانات الأصلية</h4>
-                <p className="text-xs text-stone-500 dark:text-stone-400">إعادة ضبط المصنع للكنيسة</p>
-              </div>
-            </div>
-
-            <p className="text-sm text-stone-700 dark:text-stone-300 bg-amber-50/50 dark:bg-amber-950/30 p-3.5 rounded-2xl border border-amber-100 dark:border-amber-900/40">
-              هل ترغب في إعادة ضبط البيانات الافتراضية للكنيسة؟ سيتم استعادة المراحل والسجلات النموذجية.
-            </p>
-
-            <div className="flex items-center gap-3 pt-2">
-              <button
-                onClick={() => {
-                  setShowFooterResetConfirm(false);
-                  resetToDefaultData();
-                }}
-                className="flex-1 py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-sm"
-              >
-                تأكيد الاستعادة
-              </button>
-              <button
-                onClick={() => setShowFooterResetConfirm(false)}
-                className="py-2.5 px-4 rounded-xl bg-stone-100 dark:bg-[#250c1b] text-stone-700 dark:text-stone-300 hover:bg-stone-200 text-xs font-bold transition-colors cursor-pointer"
-              >
-                إلغاء
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
     </div>
   );
