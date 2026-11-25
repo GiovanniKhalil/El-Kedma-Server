@@ -223,6 +223,10 @@ export function listenToMakhdomeen(
   return onSnapshot(
     colRef,
     (snapshot) => {
+      if (snapshot.empty) {
+        callback([]);
+        return;
+      }
       const data = snapshot.docs.map((docSnap) => ({
         id: docSnap.id,
         ...(docSnap.data() as FirestoreMakhdoom),
@@ -242,6 +246,10 @@ export function listenToUsers(
   return onSnapshot(
     colRef,
     (snapshot) => {
+      if (snapshot.empty) {
+        callback([]);
+        return;
+      }
       const data = snapshot.docs.map((docSnap) => ({
         ...(docSnap.data() as Omit<FirestoreUser, 'uid'>),
         uid: (docSnap.data() as Partial<FirestoreUser>).uid || docSnap.id,
@@ -262,6 +270,10 @@ export function listenToAttendance(
   return onSnapshot(
     colRef,
     (snapshot) => {
+      if (snapshot.empty) {
+        callback([]);
+        return;
+      }
       const data = snapshot.docs.map((docSnap) => ({
         id: docSnap.id,
         ...(docSnap.data() as FirestoreAttendance),
@@ -281,6 +293,10 @@ export function listenToLibrary(
   return onSnapshot(
     colRef,
     (snapshot) => {
+      if (snapshot.empty) {
+        callback([]);
+        return;
+      }
       const data = snapshot.docs.map((docSnap) => ({
         id: docSnap.id,
         ...(docSnap.data() as FirestoreLibraryBook),
@@ -300,6 +316,10 @@ export function listenToAnnouncements(
   return onSnapshot(
     colRef,
     (snapshot) => {
+      if (snapshot.empty) {
+        callback([]);
+        return;
+      }
       const data = snapshot.docs.map((docSnap) => ({
         id: docSnap.id,
         ...(docSnap.data() as FirestoreAnnouncement),
@@ -319,6 +339,10 @@ export function listenToSeasonalEvents(
   return onSnapshot(
     colRef,
     (snapshot) => {
+      if (snapshot.empty) {
+        callback([]);
+        return;
+      }
       const data = snapshot.docs.map((docSnap) => ({
         id: docSnap.id,
         ...(docSnap.data() as FirestoreSeasonalEvent),
@@ -338,6 +362,10 @@ export function listenToStages(
   return onSnapshot(
     colRef,
     (snapshot) => {
+      if (snapshot.empty) {
+        callback([]);
+        return;
+      }
       const data = snapshot.docs.map((docSnap) => ({
         ...(docSnap.data() as Omit<FirestoreStage, 'id'>),
         id: docSnap.id,
@@ -357,6 +385,10 @@ export function listenToPendingRegistrations(
   return onSnapshot(
     colRef,
     (snapshot) => {
+      if (snapshot.empty) {
+        callback([]);
+        return;
+      }
       const data = snapshot.docs.map((docSnap) => ({
         id: docSnap.id,
         ...(docSnap.data() as FirestorePendingRegistration),
@@ -597,18 +629,40 @@ export async function deleteUserFromFirestore(uidOrUsername: string): Promise<vo
   const clean = uidOrUsername.trim();
   const cleanLower = clean.toLowerCase();
   const path = `${COLLECTIONS.USERS}/${clean}`;
+  const aliasRefsToDelete: DocumentReference[] = [];
+  const collectAliases = (data?: Partial<FirestoreUser>) => {
+    if (!data) return;
+    const uAlias = data.username ? toLoginAliasId('u', data.username) : '';
+    const pAlias = data.phone ? toLoginAliasId('p', data.phone) : '';
+    if (uAlias) aliasRefsToDelete.push(doc(db, COLLECTIONS.LOGIN_ALIASES, uAlias));
+    if (pAlias) aliasRefsToDelete.push(doc(db, COLLECTIONS.LOGIN_ALIASES, pAlias));
+  };
+
   try {
+    const directSnap = await getDoc(doc(db, COLLECTIONS.USERS, clean));
+    if (directSnap.exists()) {
+      collectAliases(directSnap.data() as Partial<FirestoreUser>);
+    }
     await deleteDoc(doc(db, COLLECTIONS.USERS, clean));
     if (cleanLower !== clean) {
       await deleteDoc(doc(db, COLLECTIONS.USERS, cleanLower));
     }
     const qSnap = await getDocs(query(collection(db, COLLECTIONS.USERS), where('username', '==', cleanLower)));
     for (const d of qSnap.docs) {
+      collectAliases(d.data() as Partial<FirestoreUser>);
       await deleteDoc(d.ref);
     }
     const qUidSnap = await getDocs(query(collection(db, COLLECTIONS.USERS), where('uid', '==', clean)));
     for (const d of qUidSnap.docs) {
+      collectAliases(d.data() as Partial<FirestoreUser>);
       await deleteDoc(d.ref);
+    }
+    const directAlias = toLoginAliasId('u', clean);
+    if (directAlias) {
+      aliasRefsToDelete.push(doc(db, COLLECTIONS.LOGIN_ALIASES, directAlias));
+    }
+    for (const ref of aliasRefsToDelete) {
+      await deleteDoc(ref).catch(() => undefined);
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);

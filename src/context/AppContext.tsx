@@ -256,14 +256,27 @@ const defaultFilters: FilterState = {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-const ensureEncryptedUsers = (rawUsers: AppUser[]): AppUser[] => {
-  return rawUsers.map(u => {
-    if (u.password && !isPasswordEncrypted(u.password)) {
-      return { ...u, password: hashPasswordSync(u.password) };
-    }
-    return u;
-  });
-};
+const DOMAIN_STORAGE_KEYS = [
+  'church_app_stages_list',
+  'church_app_users',
+  'church_app_role',
+  'church_app_current_user',
+  'church_app_notifications',
+  'church_app_children',
+  'church_app_servants',
+  'church_app_supervisors',
+  'church_app_books',
+  'church_app_attendance',
+  'church_app_seasonal_events'
+] as const;
+
+function purgeDomainLocalStorage(): void {
+  try {
+    DOMAIN_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
+  } catch {
+    // ignore storage errors
+  }
+}
 
 const RANK_WEIGHT: Record<string, number> = {
   amin_khedma_am: 5,
@@ -378,57 +391,20 @@ function validateAssignmentsInvariants(
 }
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children: childrenProps }) => {
-  // Firebase Auth Live UID tracking so Firestore listeners attach after real Auth login
   const [firebaseAuthState, setFirebaseAuthState] = useState<{ uid: string | null; isAnonymous: boolean }>({
     uid: auth.currentUser?.uid || null,
     isAnonymous: Boolean(auth.currentUser?.isAnonymous)
   });
 
+  // Purge any legacy localStorage copies of Firestore collections on mount
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (fbUser) => {
-      setFirebaseAuthState({
-        uid: fbUser?.uid || null,
-        isAnonymous: Boolean(fbUser?.isAnonymous)
-      });
-    });
-    return () => unsub();
+    purgeDomainLocalStorage();
   }, []);
 
-  // Stages / Services State (Starts empty unless persisted by admin)
-  const [stagesList, setStagesList] = useState<StageItem[]>(() => {
-    const saved = localStorage.getItem('church_app_stages_list');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  });
-
+  // Stages / Services State (Strictly hydrated from Firestore onSnapshot — zero localStorage copy)
+  const [stagesList, setStagesList] = useState<StageItem[]>([]);
   const [isRootInitialized, setIsRootInitialized] = useState<boolean | null>(null);
-
-  const [users, setUsers] = useState<AppUser[]>(() => {
-    const saved = localStorage.getItem('church_app_users');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return ensureEncryptedUsers(parsed).map(u => {
-            const copy = { ...u };
-            delete (copy as any).canManageSupervisors;
-            return copy;
-          });
-        }
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  });
-
+  const [users, setUsers] = useState<AppUser[]>([]);
   const [pendingRegistrations, setPendingRegistrations] = useState<PendingRegistration[]>([]);
 
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
@@ -449,7 +425,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
 
   const [role, setRoleState] = useState<Role>(() => {
     if (currentUser) return currentUser.role;
-    return (localStorage.getItem('church_app_role') as Role) || 'khadem';
+    return 'khadem';
   });
 
   const [activeTab, setActiveTabState] = useState<TabId>(() => {
@@ -563,116 +539,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
   const toggleTheme = () => setThemeState(prev => (prev === 'light' ? 'dark' : 'light'));
   const setTheme = (newTheme: ThemeMode) => setThemeState(newTheme);
 
-  const [notifications, setNotifications] = useState<ChurchEventNotification[]>(() => {
-    const saved = localStorage.getItem('church_app_notifications');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  });
+  const [notifications, setNotifications] = useState<ChurchEventNotification[]>([]);
+  const [children, setChildren] = useState<Child[]>([]);
+  const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
+  const [servants, setServants] = useState<Servant[]>([]);
+  const [books, setBooks] = useState<Book[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
+  const [seasonalEvents, setSeasonalEvents] = useState<SeasonalEvent[]>([]);
 
-  const [children, setChildren] = useState<Child[]>(() => {
-    const saved = localStorage.getItem('church_app_children');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed.map((c: any) => ({
-            ...c,
-            parentRelation: c.parentRelation || 'الأب',
-            parentJob: c.parentJob || '',
-            parent2Name: c.parent2Name || '',
-            parent2Relation: c.parent2Relation || (c.parent2Name ? 'الأم' : ''),
-            parent2Phone: c.parent2Phone || '',
-            parent2Job: c.parent2Job || '',
-            birthDate: c.birthDate || (c.age ? `${new Date().getFullYear() - c.age}-${String(c.birthMonth || 1).padStart(2, '0')}-15` : '2017-07-15')
-          }));
-        }
-      } catch {
-        return [];
+  // Auth listener clears stale session/memory immediately when signed out
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (fbUser) => {
+      setFirebaseAuthState({
+        uid: fbUser?.uid || null,
+        isAnonymous: Boolean(fbUser?.isAnonymous)
+      });
+      if (!fbUser || fbUser.isAnonymous) {
+        setCurrentUser(null);
+        sessionStorage.removeItem('church_app_current_user');
+        purgeDomainLocalStorage();
+        setUsers([]);
+        setChildren([]);
+        setServants([]);
+        setSupervisors([]);
+        setBooks([]);
+        setAttendance([]);
+        setNotifications([]);
+        setStagesList([]);
+        setSeasonalEvents([]);
+        setPendingRegistrations([]);
       }
-    }
-    return [];
-  });
-
-  const [supervisors, setSupervisors] = useState<Supervisor[]>(() => {
-    const saved = localStorage.getItem('church_app_supervisors');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed.filter((sp: Supervisor) => sp.is_directory_visible !== false);
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  });
-
-  const [servants, setServants] = useState<Servant[]>(() => {
-    const saved = localStorage.getItem('church_app_servants');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed.filter((s: Servant) => s.is_directory_visible !== false && !s.roleTitle?.includes('أمين الخدمة العام'));
-        }
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  });
-
-  const [books, setBooks] = useState<Book[]>(() => {
-    const saved = localStorage.getItem('church_app_books');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed.map((b: any) => ({
-            ...b,
-            targetStages: b.targetStages && b.targetStages.length > 0 ? b.targetStages : [b.targetStage || 'عامة']
-          }));
-        }
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  });
-
-  const [attendance, setAttendance] = useState<AttendanceRecord[]>(() => {
-    const saved = localStorage.getItem('church_app_attendance');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  });
-
-  const [seasonalEvents, setSeasonalEvents] = useState<SeasonalEvent[]>(() => {
-    const saved = localStorage.getItem('church_app_seasonal_events');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  });
-
-  useEffect(() => { localStorage.setItem('church_app_seasonal_events', JSON.stringify(seasonalEvents)); }, [seasonalEvents]);
+    });
+    return () => unsub();
+  }, []);
 
   const addSeasonalEvent = async (eventData: Omit<SeasonalEvent, 'id' | 'createdAt'>) => {
     const newEvent: SeasonalEvent = {
@@ -680,36 +579,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       ...eventData,
       createdAt: new Date().toISOString().split('T')[0]
     };
-    if (firebaseAuthState.uid && !firebaseAuthState.isAnonymous) {
-      try {
-        await addSeasonalEventToFirestore(newEvent, newEvent.id);
-      } catch (err) {
-        console.warn('Failed to add seasonal event to Firestore:', err);
-      }
-    }
     setSeasonalEvents(prev => [newEvent, ...prev]);
+    try {
+      await addSeasonalEventToFirestore(newEvent, newEvent.id);
+    } catch (err) {
+      console.warn('Failed to add seasonal event to Firestore:', err);
+    }
   };
 
   const updateSeasonalEvent = async (id: string, data: Partial<SeasonalEvent>) => {
-    if (firebaseAuthState.uid && !firebaseAuthState.isAnonymous) {
-      try {
-        await updateSeasonalEventInFirestore(id, data);
-      } catch (err) {
-        console.warn('Failed to update seasonal event in Firestore:', err);
-      }
-    }
     setSeasonalEvents(prev => prev.map(e => (e.id === id ? { ...e, ...data } : e)));
+    try {
+      await updateSeasonalEventInFirestore(id, data);
+    } catch (err) {
+      console.warn('Failed to update seasonal event in Firestore:', err);
+    }
   };
 
   const deleteSeasonalEvent = async (id: string) => {
-    if (firebaseAuthState.uid && !firebaseAuthState.isAnonymous) {
-      try {
-        await deleteSeasonalEventFromFirestore(id);
-      } catch (err) {
-        console.warn('Failed to delete seasonal event from Firestore:', err);
-      }
-    }
     setSeasonalEvents(prev => prev.filter(e => e.id !== id));
+    try {
+      await deleteSeasonalEventFromFirestore(id);
+    } catch (err) {
+      console.warn('Failed to delete seasonal event from Firestore:', err);
+    }
   };
 
   const [filters, setFilters] = useState<FilterState>(defaultFilters);
@@ -729,25 +622,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
   useEffect(() => { stagesListRef.current = stagesList; }, [stagesList]);
   useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
 
-  // Persist local cache
-  useEffect(() => { localStorage.setItem('church_app_stages_list', JSON.stringify(stagesList)); }, [stagesList]);
-  useEffect(() => { localStorage.setItem('church_app_users', JSON.stringify(users)); }, [users]);
+  // Keep only tab-scoped active session user (no localStorage copies of Firestore collections)
   useEffect(() => {
     if (currentUser) {
       sessionStorage.setItem('church_app_current_user', JSON.stringify(currentUser));
       setRoleState(effectiveRole);
     } else {
       sessionStorage.removeItem('church_app_current_user');
-      localStorage.removeItem('church_app_current_user');
     }
   }, [currentUser, effectiveRole]);
-  useEffect(() => { localStorage.setItem('church_app_role', role); }, [role]);
-  useEffect(() => { localStorage.setItem('church_app_notifications', JSON.stringify(notifications)); }, [notifications]);
-  useEffect(() => { localStorage.setItem('church_app_children', JSON.stringify(children)); }, [children]);
-  useEffect(() => { localStorage.setItem('church_app_servants', JSON.stringify(servants)); }, [servants]);
-  useEffect(() => { localStorage.setItem('church_app_supervisors', JSON.stringify(supervisors)); }, [supervisors]);
-  useEffect(() => { localStorage.setItem('church_app_books', JSON.stringify(books)); }, [books]);
-  useEffect(() => { localStorage.setItem('church_app_attendance', JSON.stringify(attendance)); }, [attendance]);
 
   // Helper to apply user context cleanly after login or context switch
   const applyStageContextForUser = (u: AppUser, targetStageKey?: string) => {
@@ -896,6 +779,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
 
     // 3. Real-time listener for Users -> Deduplicate -> Hydrate Users, Servants & Supervisors
     const unsubUsers = listenToUsers((firestoreUsers) => {
+      if (firestoreUsers.length === 0) {
+        setUsers([]);
+        setServants([]);
+        setSupervisors([]);
+        setCurrentUser(null);
+        sessionStorage.removeItem('church_app_current_user');
+        return;
+      }
       setUsers(prev => {
         // Strict deduplication by cleaned phone number or uid
         const uniqueFirestoreUsersMap = new Map<string, typeof firestoreUsers[number]>();
@@ -1669,9 +1560,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       console.warn(e);
     }
     setCurrentUser(null);
+    setUsers([]);
+    setChildren([]);
+    setServants([]);
+    setSupervisors([]);
+    setBooks([]);
+    setAttendance([]);
+    setNotifications([]);
+    setStagesList([]);
+    setSeasonalEvents([]);
+    setPendingRegistrations([]);
     setActiveStageId('all');
     setActiveRoleInStage('khadem');
-    localStorage.removeItem('church_app_current_user');
+    sessionStorage.removeItem('church_app_current_user');
+    purgeDomainLocalStorage();
   };
 
   const changePassword = async (userId: string, newPass: string) => {
@@ -2118,12 +2020,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
   const deleteStage = async (stageName: string) => {
     const target = stagesListRef.current.find(s => s.name === stageName || s.id === stageName);
     setStagesList(prev => prev.filter(s => s.name !== stageName && s.id !== stageName));
-    if (target) {
-      try {
-        await deleteStageFromFirestore(target.id);
-      } catch (err) {
-        console.warn('Failed to delete stage from Firestore:', err);
-      }
+    try {
+      await deleteStageFromFirestore(target?.id || stageName);
+    } catch (err) {
+      console.warn('Failed to delete stage from Firestore:', err);
     }
   };
 
@@ -2941,16 +2841,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     setActiveStageId('all');
     setSelectedStageScopeState('all');
 
-    localStorage.removeItem('church_app_children');
-    localStorage.removeItem('church_app_servants');
-    localStorage.removeItem('church_app_supervisors');
-    localStorage.removeItem('church_app_attendance');
-    localStorage.removeItem('church_app_notifications');
-    localStorage.removeItem('church_app_books');
-    localStorage.removeItem('church_app_stages_list');
-    localStorage.removeItem('church_app_seasonal_events');
+    purgeDomainLocalStorage();
     localStorage.setItem('church_app_theme', currentTheme);
-    localStorage.setItem('church_app_users', JSON.stringify(preservedUsers));
   };
 
   const exportDatabaseJSON = () => {
