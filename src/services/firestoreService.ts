@@ -690,15 +690,21 @@ export async function checkRootBootstrapStatusFromFirestore(): Promise<boolean> 
   }
 }
 
-export async function ensureRootBootstrapLockInFirestore(): Promise<void> {
+export async function ensureRootBootstrapLockInFirestore(rootUid?: string): Promise<void> {
   try {
     const lockRef = doc(db, COLLECTIONS.APP_META, 'root_status');
     const snap = await getDoc(lockRef);
-    if (!snap.exists()) {
-      await setDoc(lockRef, {
-        initialized: true,
-        createdAt: new Date().toISOString()
-      });
+    const existingData = snap.exists() ? snap.data() : undefined;
+    if (!snap.exists() || (rootUid && !existingData?.rootUid)) {
+      await setDoc(
+        lockRef,
+        {
+          initialized: true,
+          ...(rootUid ? { rootUid } : {}),
+          createdAt: existingData?.createdAt || new Date().toISOString()
+        },
+        { merge: true }
+      );
     }
   } catch {
     // Ignore if already exists or unauthorized
@@ -718,14 +724,9 @@ export async function seedRootAdminOnceInFirestore(
     }
 
     const now = new Date().toISOString();
-    const batch = writeBatch(db);
 
-    batch.set(doc(db, COLLECTIONS.APP_META, 'root_status'), {
-      initialized: true,
-      createdAt: now
-    });
-
-    batch.set(
+    // 1. Create the canonical /users/{uid} document FIRST so subsequent rules (isAdmin) succeed cleanly
+    await setDoc(
       doc(db, COLLECTIONS.USERS, user.uid),
       stripUndefined({
         ...user,
@@ -739,16 +740,27 @@ export async function seedRootAdminOnceInFirestore(
       })
     );
 
+    // 2. Lock root bootstrap in /app_meta/root_status AFTER /users/{uid} exists
+    await setDoc(
+      doc(db, COLLECTIONS.APP_META, 'root_status'),
+      {
+        initialized: true,
+        rootUid: user.uid,
+        createdAt: now
+      },
+      { merge: true }
+    );
+
+    // 3. Register zero-PII login aliases for username & phone
     const uAlias = toLoginAliasId('u', user.username || '');
     if (uAlias) {
-      batch.set(doc(db, COLLECTIONS.LOGIN_ALIASES, uAlias), { authEmail });
+      await setDoc(doc(db, COLLECTIONS.LOGIN_ALIASES, uAlias), { authEmail: authEmail.toLowerCase() });
     }
     const pAlias = toLoginAliasId('p', user.phone || '');
     if (pAlias) {
-      batch.set(doc(db, COLLECTIONS.LOGIN_ALIASES, pAlias), { authEmail });
+      await setDoc(doc(db, COLLECTIONS.LOGIN_ALIASES, pAlias), { authEmail: authEmail.toLowerCase() });
     }
 
-    await batch.commit();
     return { seeded: true };
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);

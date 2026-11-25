@@ -38,8 +38,17 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
 
-    function isAminKhedmaAm() {
+    function isAdmin() {
       return hasCallerDoc() && callerRole() == 'amin_khedma_am';
+    }
+
+    function isAminKhedmaAm() {
+      return isAdmin();
+    }
+
+    function isApprovedStaff() {
+      return hasCallerDoc() &&
+        callerRole() in ['amin_khedma_am', 'amin_fasl', 'mosaed_amin', 'khadem', 'general_dock'];
     }
 
     function isAminFaslOrAbove() {
@@ -48,6 +57,15 @@ service cloud.firestore {
         callerRole() == 'amin_fasl' ||
         callerRole() == 'mosaed_amin'
       );
+    }
+
+    // Safe check for first-time root admin bootstrap (prevents duplicate root admins once seeded)
+    function isBootstrapNeeded() {
+      return !exists(/databases/$(database)/documents/app_meta/root_status) ||
+        !('rootUid' in get(/databases/$(database)/documents/app_meta/root_status).data) ||
+        !(get(/databases/$(database)/documents/app_meta/root_status).data.rootUid is string) ||
+        get(/databases/$(database)/documents/app_meta/root_status).data.rootUid.size() == 0 ||
+        !exists(/databases/$(database)/documents/users/$(get(/databases/$(database)/documents/app_meta/root_status).data.rootUid));
     }
 
     // Prevent modifying immutable audit/ownership fields
@@ -167,6 +185,15 @@ service cloud.firestore {
         data.authEmail.size() <= 160;
     }
 
+    function isValidRootStatusPayload(data) {
+      return data.keys().hasAll(['initialized', 'createdAt']) &&
+        data.keys().hasOnly(['initialized', 'rootUid', 'createdAt']) &&
+        data.initialized == true &&
+        data.createdAt is string &&
+        data.createdAt.size() <= 40 &&
+        (!('rootUid' in data) || (data.rootUid is string && data.rootUid == request.auth.uid));
+    }
+
     // =========================================================================
     // Collection Rules (Zero Unauthenticated Reads, Protected Root & Anti-Escalation)
     // =========================================================================
@@ -174,15 +201,15 @@ service cloud.firestore {
     // Seed-Once Root Bootstrap Lock (Zero PII)
     match /app_meta/{docId} {
       allow get: if docId == 'root_status' && request.auth != null;
-      allow list, update, delete: if false;
+      allow list, delete: if false;
       allow create: if docId == 'root_status' &&
         isAuthenticated() &&
         !exists(/databases/$(database)/documents/app_meta/root_status) &&
-        incoming().keys().hasAll(['initialized', 'createdAt']) &&
-        incoming().keys().hasOnly(['initialized', 'createdAt']) &&
-        incoming().initialized == true &&
-        incoming().createdAt is string &&
-        incoming().createdAt.size() <= 40;
+        isValidRootStatusPayload(incoming());
+      allow update: if docId == 'root_status' &&
+        isAuthenticated() &&
+        (isBootstrapNeeded() || isAdmin()) &&
+        isValidRootStatusPayload(incoming());
     }
 
     // Zero-PII Login Alias Index (Resolves updated username/phone to canonical Firebase Auth email)
@@ -192,33 +219,42 @@ service cloud.firestore {
       allow create, update: if isValidId(aliasId) &&
         isAuthenticated() &&
         isValidLoginAlias(incoming()) &&
-        (isAminKhedmaAm() || incoming().authEmail == request.auth.token.email);
+        (
+          isAdmin() ||
+          (request.auth.token.email is string && incoming().authEmail.lower() == request.auth.token.email.lower())
+        );
       allow delete: if isValidId(aliasId) &&
         isAuthenticated() &&
-        (isAminKhedmaAm() || existing().authEmail == request.auth.token.email);
+        (
+          isAdmin() ||
+          (request.auth.token.email is string && existing().authEmail.lower() == request.auth.token.email.lower())
+        );
     }
 
-    // Users collection
+    // Users collection (Authenticated non-anonymous reads allowed for isBootstrapNeeded check)
     match /users/{userId} {
       allow get: if isValidId(userId) && isAuthenticated();
-      allow list: if isAuthenticated() && resource.data.uid is string;
+      allow list: if isAuthenticated();
 
       allow create: if isValidId(userId) &&
         isAuthenticated() &&
         isValidUserPayload(incoming()) &&
         (
-          isAminKhedmaAm() ||
+          isAdmin() ||
           (
-            incoming().role == 'amin_khedma_am' &&
-            incoming().get('isProtectedRoot', false) == true &&
             userId == request.auth.uid &&
             incoming().uid == request.auth.uid &&
-            !exists(/databases/$(database)/documents/app_meta/root_status) &&
-            existsAfter(/databases/$(database)/documents/app_meta/root_status)
+            incoming().role == 'amin_khedma_am' &&
+            incoming().get('isProtectedRoot', false) == true &&
+            !exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+            isBootstrapNeeded()
           ) ||
-          (incoming().role in ['khadem', 'general_dock'] &&
+          (
+            isAminFaslOrAbove() &&
+            incoming().role in ['khadem', 'general_dock'] &&
             incoming().get('isProtectedRoot', false) == false &&
-            incoming().get('isAdminAssistant', false) == false)
+            incoming().get('isAdminAssistant', false) == false
+          )
         );
 
       allow update: if isValidId(userId) &&
@@ -226,7 +262,7 @@ service cloud.firestore {
         isValidUserPayload(incoming()) &&
         immutableAuditFields() &&
         (
-          isAminKhedmaAm() ||
+          isAdmin() ||
           (
             isAminFaslOrAbove() &&
             existing().role != 'amin_khedma_am' &&
@@ -245,7 +281,7 @@ service cloud.firestore {
 
       // Forbid deleting protected root / amin_khedma_am account
       allow delete: if isValidId(userId) &&
-        isAminKhedmaAm() &&
+        isAdmin() &&
         existing().role != 'amin_khedma_am' &&
         existing().get('isProtectedRoot', false) != true;
     }
@@ -256,42 +292,42 @@ service cloud.firestore {
         request.auth != null &&
         isValidPendingRegistration(incoming()) &&
         incoming().status == 'pending';
-      allow get: if isValidId(regId) && isAminKhedmaAm();
-      allow list: if isAminKhedmaAm() && resource.data.status is string;
+      allow get: if isValidId(regId) && isAdmin();
+      allow list: if isAdmin();
       allow update: if isValidId(regId) &&
-        isAminKhedmaAm() &&
+        isAdmin() &&
         isValidPendingRegistration(incoming()) &&
         immutableAuditFields();
-      allow delete: if isValidId(regId) && isAminKhedmaAm();
+      allow delete: if isValidId(regId) && isAdmin();
     }
 
     // Makhdomeen (Children) collection
     match /makhdomeen/{makhdoomId} {
-      allow get: if isValidId(makhdoomId) && isAuthenticated();
-      allow list: if isAuthenticated() && resource.data.fullName is string;
-      allow create: if isValidId(makhdoomId) && isAuthenticated() && isValidMakhdoom(incoming());
-      allow update: if isValidId(makhdoomId) && isAuthenticated() && isValidMakhdoom(incoming()) && immutableAuditFields();
+      allow get: if isValidId(makhdoomId) && isApprovedStaff();
+      allow list: if isApprovedStaff();
+      allow create: if isValidId(makhdoomId) && isApprovedStaff() && isValidMakhdoom(incoming());
+      allow update: if isValidId(makhdoomId) && isApprovedStaff() && isValidMakhdoom(incoming()) && immutableAuditFields();
       allow delete: if isValidId(makhdoomId) && isAminFaslOrAbove();
     }
 
     // Attendance collection (Anti-self-attendance enforced)
     match /attendance/{attendanceId} {
-      allow get: if isValidId(attendanceId) && isAuthenticated();
-      allow list: if isAuthenticated() && resource.data.personId is string;
-      allow create: if isValidId(attendanceId) && isAuthenticated() && isValidAttendance(incoming());
-      allow update: if isValidId(attendanceId) && isAuthenticated() && isValidAttendance(incoming()) && immutableAuditFields();
-      allow delete: if isValidId(attendanceId) && isAminKhedmaAm();
+      allow get: if isValidId(attendanceId) && isApprovedStaff();
+      allow list: if isApprovedStaff();
+      allow create: if isValidId(attendanceId) && isApprovedStaff() && isValidAttendance(incoming());
+      allow update: if isValidId(attendanceId) && isApprovedStaff() && isValidAttendance(incoming()) && immutableAuditFields();
+      allow delete: if isValidId(attendanceId) && isAdmin();
     }
 
     // Library collection (General books restricted to amin_khedma_am; stage books editable by stage leaders)
     match /library/{bookId} {
-      allow get: if isValidId(bookId) && isAuthenticated();
-      allow list: if isAuthenticated() && resource.data.title is string;
+      allow get: if isValidId(bookId) && isApprovedStaff();
+      allow list: if isApprovedStaff();
       allow create: if isValidId(bookId) &&
         isAminFaslOrAbove() &&
         isValidLibraryBook(incoming()) &&
         (
-          isAminKhedmaAm() ||
+          isAdmin() ||
           (incoming().get('visibility', 'specific_stages') == 'specific_stages' &&
             incoming().targetGrade != 'عامة')
         );
@@ -300,13 +336,13 @@ service cloud.firestore {
         isValidLibraryBook(incoming()) &&
         immutableAuditFields() &&
         (
-          isAminKhedmaAm() ||
+          isAdmin() ||
           (incoming().get('visibility', 'specific_stages') == 'specific_stages' &&
             incoming().targetGrade != 'عامة')
         );
       allow delete: if isValidId(bookId) &&
         (
-          isAminKhedmaAm() ||
+          isAdmin() ||
           (isAminFaslOrAbove() &&
             existing().get('visibility', 'specific_stages') != 'all' &&
             existing().targetGrade != 'عامة')
@@ -315,13 +351,13 @@ service cloud.firestore {
 
     // Announcements collection (General/general_dock restricted to amin_khedma_am; stage-specific allowed for stage leaders)
     match /announcements/{announcementId} {
-      allow get: if isValidId(announcementId) && isAuthenticated();
-      allow list: if isAuthenticated() && resource.data.title is string;
+      allow get: if isValidId(announcementId) && isApprovedStaff();
+      allow list: if isApprovedStaff();
       allow create: if isValidId(announcementId) &&
         isAminFaslOrAbove() &&
         isValidAnnouncement(incoming()) &&
         (
-          isAminKhedmaAm() ||
+          isAdmin() ||
           (incoming().get('targetScope', 'specific_stages') == 'specific_stages' &&
             incoming().get('targetRole', '') != 'all' &&
             incoming().get('targetRole', '') != 'عامة')
@@ -331,14 +367,14 @@ service cloud.firestore {
         isValidAnnouncement(incoming()) &&
         immutableAuditFields() &&
         (
-          isAminKhedmaAm() ||
+          isAdmin() ||
           (incoming().get('targetScope', 'specific_stages') == 'specific_stages' &&
             incoming().get('targetRole', '') != 'all' &&
             incoming().get('targetRole', '') != 'عامة')
         );
       allow delete: if isValidId(announcementId) &&
         (
-          isAminKhedmaAm() ||
+          isAdmin() ||
           (isAminFaslOrAbove() &&
             existing().get('targetScope', 'specific_stages') == 'specific_stages' &&
             existing().get('targetRole', '') != 'all' &&
@@ -348,31 +384,29 @@ service cloud.firestore {
 
     // Stages collection
     match /stages/{stageId} {
-      allow get: if isValidId(stageId) && isAuthenticated();
-      allow list: if isAuthenticated() && resource.data.name is string;
-      allow create: if isValidId(stageId) && isAminKhedmaAm() && isValidStage(incoming());
-      allow update: if isValidId(stageId) && isAminKhedmaAm() && isValidStage(incoming()) && immutableAuditFields();
-      allow delete: if isValidId(stageId) && isAminKhedmaAm();
+      allow get: if isValidId(stageId) && isApprovedStaff();
+      allow list: if isApprovedStaff();
+      allow create: if isValidId(stageId) && isAdmin() && isValidStage(incoming());
+      allow update: if isValidId(stageId) && isAdmin() && isValidStage(incoming()) && immutableAuditFields();
+      allow delete: if isValidId(stageId) && isAdmin();
     }
 
     // Seasonal events collection
     match /seasonal_events/{eventId} {
-      allow get: if isValidId(eventId) && isAuthenticated();
-      allow list: if isAuthenticated() &&
-        (('name' in resource.data && resource.data.name is string) ||
-         ('title' in resource.data && resource.data.title is string));
+      allow get: if isValidId(eventId) && isApprovedStaff();
+      allow list: if isApprovedStaff();
       allow create: if isValidId(eventId) && isAminFaslOrAbove() && isValidSeasonalEvent(incoming());
       allow update: if isValidId(eventId) && isAminFaslOrAbove() && isValidSeasonalEvent(incoming()) && immutableAuditFields();
-      allow delete: if isValidId(eventId) && isAminKhedmaAm();
+      allow delete: if isValidId(eventId) && isAdmin();
     }
 
     // Test connection doc (Authenticated non-anonymous only)
     match /test/{docId} {
       allow get: if isValidId(docId) && isAuthenticated();
-      allow list: if isAuthenticated() && resource.data.status is string;
+      allow list: if isAuthenticated();
       allow create, update: if isValidId(docId) && isAuthenticated() &&
         incoming().keys().hasOnly(['timestamp', 'clientCheck', 'status']);
-      allow delete: if isValidId(docId) && isAminKhedmaAm();
+      allow delete: if isValidId(docId) && isAdmin();
     }
   }
 }

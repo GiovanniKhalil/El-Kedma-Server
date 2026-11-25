@@ -175,6 +175,7 @@
       "type": "object",
       "properties": {
         "initialized": { "type": "boolean", "description": "True once root amin_khedma_am is initialized" },
+        "rootUid": { "type": "string", "description": "UID of the protected root admin", "maxLength": 128 },
         "createdAt": { "type": "string", "description": "Initialization timestamp", "maxLength": 40 }
       },
       "required": ["initialized", "createdAt"]

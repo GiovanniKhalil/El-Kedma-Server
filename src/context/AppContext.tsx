@@ -395,6 +395,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     uid: auth.currentUser?.uid || null,
     isAnonymous: Boolean(auth.currentUser?.isAnonymous)
   });
+  const [approvedCurrentUserLoaded, setApprovedCurrentUserLoaded] = useState<boolean>(false);
+  const inFlightAuthTransitionRef = useRef<boolean>(false);
+  const authCheckSeqRef = useRef<number>(0);
 
   // Purge any legacy localStorage copies of Firestore collections on mount
   useEffect(() => {
@@ -547,27 +550,111 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [seasonalEvents, setSeasonalEvents] = useState<SeasonalEvent[]>([]);
 
-  // Auth listener clears stale session/memory immediately when signed out
+  // Auth listener clears stale session/memory on sign-out and verifies /users/{uid} before enabling Firestore listeners
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (fbUser) => {
+    const unsub = onAuthStateChanged(auth, async (fbUser) => {
+      const checkSeq = ++authCheckSeqRef.current;
       setFirebaseAuthState({
         uid: fbUser?.uid || null,
         isAnonymous: Boolean(fbUser?.isAnonymous)
       });
+
       if (!fbUser || fbUser.isAnonymous) {
-        setCurrentUser(null);
-        sessionStorage.removeItem('church_app_current_user');
-        purgeDomainLocalStorage();
-        setUsers([]);
-        setChildren([]);
-        setServants([]);
-        setSupervisors([]);
-        setBooks([]);
-        setAttendance([]);
-        setNotifications([]);
-        setStagesList([]);
-        setSeasonalEvents([]);
-        setPendingRegistrations([]);
+        if (!inFlightAuthTransitionRef.current) {
+          setApprovedCurrentUserLoaded(false);
+          setCurrentUser(null);
+          sessionStorage.removeItem('church_app_current_user');
+          purgeDomainLocalStorage();
+          setUsers([]);
+          setChildren([]);
+          setServants([]);
+          setSupervisors([]);
+          setBooks([]);
+          setAttendance([]);
+          setNotifications([]);
+          setStagesList([]);
+          setSeasonalEvents([]);
+          setPendingRegistrations([]);
+        }
+        return;
+      }
+
+      // Skip re-verification if initializeRootAdmin or login is actively managing the transition
+      if (inFlightAuthTransitionRef.current) {
+        return;
+      }
+
+      try {
+        let firestoreUser = await getUserFromFirestore(fbUser.uid);
+        if (!firestoreUser && fbUser.email) {
+          const emailLocal = fbUser.email.split('@')[0];
+          if (emailLocal) {
+            firestoreUser = await getUserFromFirestore(emailLocal);
+          }
+        }
+
+        if (checkSeq !== authCheckSeqRef.current || inFlightAuthTransitionRef.current) {
+          return;
+        }
+
+        if (!firestoreUser) {
+          setApprovedCurrentUserLoaded(false);
+          setCurrentUser(null);
+          sessionStorage.removeItem('church_app_current_user');
+          return;
+        }
+
+        const docId = firestoreUser.uid;
+        const rawRole = (firestoreUser.role as Role) || 'khadem';
+        const effectiveStage = (firestoreUser.assignedStage || firestoreUser.assignedClass || 'عامة') as Stage;
+        const assignments = buildAssignmentsForUser(
+          {
+            role: rawRole,
+            assignedStage: effectiveStage,
+            assignedStages: firestoreUser.assignedStages,
+            assignments: firestoreUser.assignments as ClassAssignment[] | undefined
+          },
+          stagesListRef.current
+        );
+        const existingCurr = currentUserRef.current;
+        const mappedUser: AppUser = {
+          id: docId,
+          uid: docId,
+          username: firestoreUser.username || docId,
+          authEmail: firestoreUser.authEmail || fbUser.email || formatSafeChurchEmail(firestoreUser.username || docId, 'stjohn.church'),
+          name: firestoreUser.fullName || existingCurr?.name || firestoreUser.username || docId,
+          phone: firestoreUser.phone || existingCurr?.phone || '',
+          avatarUrl: firestoreUser.avatarUrl || existingCurr?.avatarUrl || '',
+          role: rawRole,
+          assignedStage: (assignments[0]?.stageName || effectiveStage) as Stage,
+          assignedStages: assignments.slice(1).map(a => a.stageName),
+          assignments,
+          isProtectedRoot: Boolean(firestoreUser.isProtectedRoot || rawRole === 'amin_khedma_am'),
+          isAdminAssistant: Boolean(firestoreUser.isAdminAssistant),
+          canAssignMakhdomeen: firestoreUser.canAssignMakhdomeen !== undefined ? Boolean(firestoreUser.canAssignMakhdomeen) : true,
+          mustChangePassword: Boolean(firestoreUser.mustChangePassword || firestoreUser.isFirstLogin),
+          isTempPassword: Boolean(firestoreUser.isFirstLogin || firestoreUser.mustChangePassword),
+          password: firestoreUser.passwordHash || existingCurr?.password || '',
+          birthDate: firestoreUser.birthDate || existingCurr?.birthDate,
+          job: firestoreUser.job || existingCurr?.job,
+          area: firestoreUser.area || existingCurr?.area,
+          notes: firestoreUser.notes || existingCurr?.notes,
+          createdAt: firestoreUser.createdAt || existingCurr?.createdAt || new Date().toISOString().split('T')[0],
+          updatedAt: firestoreUser.updatedAt
+        };
+
+        const isNewUserSession = existingCurr?.id !== mappedUser.id;
+        setCurrentUser(mappedUser);
+        setRoleState(mappedUser.role);
+        setIsRootInitialized(true);
+        if (isNewUserSession) {
+          applyStageContextForUser(mappedUser);
+        }
+        setApprovedCurrentUserLoaded(true);
+      } catch {
+        if (checkSeq === authCheckSeqRef.current && !inFlightAuthTransitionRef.current) {
+          setApprovedCurrentUserLoaded(false);
+        }
       }
     });
     return () => unsub();
@@ -714,10 +801,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
   }, [currentUser]);
 
   // ============================================================================
-  // Real-Time Firebase Firestore Subscriptions (Bound to Non-Anonymous Auth Session)
+  // Real-Time Firebase Firestore Subscriptions (Gated on Verified /users/{uid} Doc)
   // ============================================================================
   useEffect(() => {
-    if (!firebaseAuthState.uid || firebaseAuthState.isAnonymous) {
+    if (
+      !firebaseAuthState.uid ||
+      firebaseAuthState.isAnonymous ||
+      !approvedCurrentUserLoaded ||
+      !currentUser
+    ) {
       return;
     }
 
@@ -783,6 +875,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         setUsers([]);
         setServants([]);
         setSupervisors([]);
+        setApprovedCurrentUserLoaded(false);
         setCurrentUser(null);
         sessionStorage.removeItem('church_app_current_user');
         return;
@@ -1131,13 +1224,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       unsubSeasonalEvents();
       unsubAttendance();
     };
-  }, [firebaseAuthState.uid, firebaseAuthState.isAnonymous]);
+  }, [firebaseAuthState.uid, firebaseAuthState.isAnonymous, approvedCurrentUserLoaded, currentUser?.id]);
 
-  // 7. Pending Registrations Listener (strictly for amin_khedma_am or admin assistant)
+  // 7. Pending Registrations Listener (strictly for verified amin_khedma_am or admin assistant)
   useEffect(() => {
     const canReviewPending =
       Boolean(firebaseAuthState.uid) &&
       !firebaseAuthState.isAnonymous &&
+      approvedCurrentUserLoaded &&
       (currentUser?.role === 'amin_khedma_am' || Boolean(currentUser?.isAdminAssistant));
 
     if (!canReviewPending) {
@@ -1161,7 +1255,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     });
 
     return () => unsubPending();
-  }, [firebaseAuthState.uid, firebaseAuthState.isAnonymous, currentUser?.role, currentUser?.isAdminAssistant]);
+  }, [firebaseAuthState.uid, firebaseAuthState.isAnonymous, approvedCurrentUserLoaded, currentUser?.role, currentUser?.isAdminAssistant]);
 
   // ============================================================================
   // Auth Methods (Seed-Once Protected Root + Alias-Aware Sign-In)
@@ -1194,6 +1288,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     let createdAuthUser = null as Awaited<ReturnType<typeof createRootFirebaseAuthUser>>['user'] | null;
     let didCreateAuthUser = false;
 
+    inFlightAuthTransitionRef.current = true;
+    setApprovedCurrentUserLoaded(false);
+
     try {
       const authRes = await createRootFirebaseAuthUser(cleanUsername, cleanPass);
       createdAuthUser = authRes.user;
@@ -1202,6 +1299,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       const encryptedHash = await hashPassword(cleanPass);
       const createdAt = new Date().toISOString();
 
+      // 1. Wait for /users/{uid} (plus root_status & login_aliases) to succeed BEFORE starting any onSnapshot listeners
       const seedResult = await seedRootAdminOnceInFirestore(
         {
           uid: canonicalUid,
@@ -1230,6 +1328,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
           await createdAuthUser.delete().catch(() => undefined);
         }
         await logoutFirebaseAuth().catch(() => undefined);
+        setApprovedCurrentUserLoaded(false);
         setIsRootInitialized(true);
         return {
           success: false,
@@ -1257,21 +1356,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         createdAt: createdAt.split('T')[0]
       };
 
+      // 2. Activate currentUser and unlock onSnapshot subscriptions AFTER /users/{uid} exists
       setUsers([rootUser]);
       setCurrentUser(rootUser);
       setRoleState('amin_khedma_am');
       setIsRootInitialized(true);
       applyStageContextForUser(rootUser);
+      setApprovedCurrentUserLoaded(true);
       return { success: true };
     } catch (err: any) {
+      setApprovedCurrentUserLoaded(false);
       if (didCreateAuthUser && createdAuthUser) {
         await createdAuthUser.delete().catch(() => undefined);
       }
       await logoutFirebaseAuth().catch(() => undefined);
+      const code = err?.code || '';
+      if (
+        code === 'auth/invalid-credential' ||
+        code === 'auth/wrong-password' ||
+        code === 'auth/invalid-login-credentials'
+      ) {
+        return {
+          success: false,
+          error: 'اسم المستخدم مسجل مسبقاً في Firebase Authentication بكلمة مرور مختلفة. يرجى حذفه من Firebase Authentication أو استخدام نفس كلمة المرور.'
+        };
+      }
       return {
         success: false,
         error: err?.message || 'تعذر تهيئة حساب أمين الخدمة العام.'
       };
+    } finally {
+      inFlightAuthTransitionRef.current = false;
     }
   };
 
@@ -1287,138 +1402,145 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       return { success: false, error: 'يرجى إدخال اسم المستخدم وكلمة السر' };
     }
 
-    // 1. Resolve canonical Firebase Auth email from local cache or zero-PII /login_aliases
-    const cachedUser = usersRef.current.find(
-      u =>
-        u.username?.toLowerCase() === cleanLower ||
-        (u.phone && u.phone.trim() === cleanInput) ||
-        u.id === cleanInput
-    );
-    let resolvedAuthEmail = cachedUser?.authEmail || undefined;
-    if (!resolvedAuthEmail) {
-      resolvedAuthEmail = (await resolveAuthEmailViaAlias(cleanInput)) || undefined;
-    }
-    const authIdentifier = cachedUser?.username || cleanLower;
+    inFlightAuthTransitionRef.current = true;
+    setApprovedCurrentUserLoaded(false);
 
-    // 2. Establish non-anonymous Firebase Auth session FIRST so Firestore rules permit reading /users
-    let authUid: string | null = null;
-    let signedInEmail: string | undefined = resolvedAuthEmail;
     try {
-      const fbUser = await loginWithFirebaseAuth(authIdentifier, cleanPass, {
-        resolvedAuthEmail
-      });
-      authUid = fbUser.uid;
-      signedInEmail = fbUser.email || resolvedAuthEmail || formatSafeChurchEmail(authIdentifier, 'stjohn.church');
-    } catch (authErr: any) {
-      // Allow local offline verification ONLY if cached locally
-      if (!cachedUser) {
-        return { success: false, error: authErr.message || 'اسم المستخدم أو كلمة السر غير صحيحة' };
+      // 1. Resolve canonical Firebase Auth email from local cache or zero-PII /login_aliases
+      const cachedUser = usersRef.current.find(
+        u =>
+          u.username?.toLowerCase() === cleanLower ||
+          (u.phone && u.phone.trim() === cleanInput) ||
+          u.id === cleanInput
+      );
+      let resolvedAuthEmail = cachedUser?.authEmail || undefined;
+      if (!resolvedAuthEmail) {
+        resolvedAuthEmail = (await resolveAuthEmailViaAlias(cleanInput)) || undefined;
       }
-    }
+      const authIdentifier = cachedUser?.username || cleanLower;
 
-    // 3. Lookup canonical user record in Firestore
-    let found: AppUser | null = cachedUser ? { ...cachedUser } : null;
-    try {
-      let firestoreUser = authUid ? await getUserFromFirestore(authUid) : null;
-      if (!firestoreUser) {
-        firestoreUser = await getUserFromFirestore(cleanInput);
+      // 2. Establish non-anonymous Firebase Auth session FIRST so Firestore rules permit reading /users
+      let authUid: string | null = null;
+      let signedInEmail: string | undefined = resolvedAuthEmail;
+      try {
+        const fbUser = await loginWithFirebaseAuth(authIdentifier, cleanPass, {
+          resolvedAuthEmail
+        });
+        authUid = fbUser.uid;
+        signedInEmail = fbUser.email || resolvedAuthEmail || formatSafeChurchEmail(authIdentifier, 'stjohn.church');
+      } catch (authErr: any) {
+        if (!cachedUser) {
+          return { success: false, error: authErr.message || 'اسم المستخدم أو كلمة السر غير صحيحة' };
+        }
       }
 
-      if (firestoreUser) {
-        const docId = firestoreUser.uid;
-        const rawRole = (firestoreUser.role as Role) || 'khadem';
-        const effectiveStage = (firestoreUser.assignedStage || firestoreUser.assignedClass || 'عامة') as Stage;
-        const assignments = buildAssignmentsForUser(
-          {
+      // 3. Lookup canonical user record in Firestore
+      let found: AppUser | null = cachedUser ? { ...cachedUser } : null;
+      try {
+        let firestoreUser = authUid ? await getUserFromFirestore(authUid) : null;
+        if (!firestoreUser) {
+          firestoreUser = await getUserFromFirestore(cleanInput);
+        }
+
+        if (firestoreUser) {
+          const docId = firestoreUser.uid;
+          const rawRole = (firestoreUser.role as Role) || 'khadem';
+          const effectiveStage = (firestoreUser.assignedStage || firestoreUser.assignedClass || 'عامة') as Stage;
+          const assignments = buildAssignmentsForUser(
+            {
+              role: rawRole,
+              assignedStage: effectiveStage,
+              assignedStages: firestoreUser.assignedStages,
+              assignments: firestoreUser.assignments as ClassAssignment[] | undefined
+            },
+            stagesListRef.current
+          );
+
+          found = {
+            id: docId,
+            uid: docId,
+            username: firestoreUser.username || authIdentifier,
+            authEmail: firestoreUser.authEmail || signedInEmail || formatSafeChurchEmail(firestoreUser.username || docId, 'stjohn.church'),
+            name: firestoreUser.fullName || found?.name || authIdentifier,
+            phone: firestoreUser.phone || found?.phone || '',
+            avatarUrl: firestoreUser.avatarUrl || found?.avatarUrl || '',
             role: rawRole,
-            assignedStage: effectiveStage,
-            assignedStages: firestoreUser.assignedStages,
-            assignments: firestoreUser.assignments as ClassAssignment[] | undefined
-          },
-          stagesListRef.current
-        );
-
-        found = {
-          id: docId,
-          uid: docId,
-          username: firestoreUser.username || authIdentifier,
-          authEmail: firestoreUser.authEmail || signedInEmail || formatSafeChurchEmail(firestoreUser.username || docId, 'stjohn.church'),
-          name: firestoreUser.fullName || found?.name || authIdentifier,
-          phone: firestoreUser.phone || found?.phone || '',
-          avatarUrl: firestoreUser.avatarUrl || found?.avatarUrl || '',
-          role: rawRole,
-          assignedStage: (assignments[0]?.stageName || effectiveStage) as Stage,
-          assignedStages: assignments.slice(1).map(a => a.stageName),
-          assignments,
-          isProtectedRoot: Boolean(firestoreUser.isProtectedRoot || rawRole === 'amin_khedma_am'),
-          isAdminAssistant: Boolean(firestoreUser.isAdminAssistant),
-          canAssignMakhdomeen: firestoreUser.canAssignMakhdomeen !== undefined ? Boolean(firestoreUser.canAssignMakhdomeen) : true,
-          mustChangePassword: Boolean(firestoreUser.mustChangePassword || firestoreUser.isFirstLogin),
-          isTempPassword: Boolean(firestoreUser.isFirstLogin || firestoreUser.mustChangePassword),
-          password: firestoreUser.passwordHash || found?.password || '',
-          birthDate: firestoreUser.birthDate || found?.birthDate,
-          job: firestoreUser.job || found?.job,
-          area: firestoreUser.area || found?.area,
-          notes: firestoreUser.notes || found?.notes,
-          createdAt: firestoreUser.createdAt || found?.createdAt || new Date().toISOString().split('T')[0]
-        };
+            assignedStage: (assignments[0]?.stageName || effectiveStage) as Stage,
+            assignedStages: assignments.slice(1).map(a => a.stageName),
+            assignments,
+            isProtectedRoot: Boolean(firestoreUser.isProtectedRoot || rawRole === 'amin_khedma_am'),
+            isAdminAssistant: Boolean(firestoreUser.isAdminAssistant),
+            canAssignMakhdomeen: firestoreUser.canAssignMakhdomeen !== undefined ? Boolean(firestoreUser.canAssignMakhdomeen) : true,
+            mustChangePassword: Boolean(firestoreUser.mustChangePassword || firestoreUser.isFirstLogin),
+            isTempPassword: Boolean(firestoreUser.isFirstLogin || firestoreUser.mustChangePassword),
+            password: firestoreUser.passwordHash || found?.password || '',
+            birthDate: firestoreUser.birthDate || found?.birthDate,
+            job: firestoreUser.job || found?.job,
+            area: firestoreUser.area || found?.area,
+            notes: firestoreUser.notes || found?.notes,
+            createdAt: firestoreUser.createdAt || found?.createdAt || new Date().toISOString().split('T')[0]
+          };
+        }
+      } catch (fsErr) {
+        console.warn('Firestore user lookup error:', fsErr);
       }
-    } catch (fsErr) {
-      console.warn('Firestore user lookup error:', fsErr);
-    }
 
-    if (!found) {
-      if (authUid) {
-        await logoutFirebaseAuth().catch(() => undefined);
+      if (!found) {
+        if (authUid) {
+          await logoutFirebaseAuth().catch(() => undefined);
+        }
+        return { success: false, error: 'اسم المستخدم أو رقم الهاتف غير مسجل أو بانتظار موافقة أمين الخدمة العام' };
       }
-      return { success: false, error: 'اسم المستخدم أو رقم الهاتف غير مسجل أو بانتظار موافقة أمين الخدمة العام' };
-    }
 
-    // 4. Verify stored SHA-256 password hash strictly
-    const storedPass = found.passwordHash || found.password;
-    const isPasswordMatch = await verifyPassword(cleanPass, storedPass);
-    if (!isPasswordMatch) {
-      if (authUid) {
-        await logoutFirebaseAuth().catch(() => undefined);
+      // 4. Verify stored SHA-256 password hash strictly
+      const storedPass = found.passwordHash || found.password;
+      const isPasswordMatch = await verifyPassword(cleanPass, storedPass);
+      if (!isPasswordMatch) {
+        if (authUid) {
+          await logoutFirebaseAuth().catch(() => undefined);
+        }
+        return { success: false, error: 'اسم المستخدم أو كلمة السر غير صحيحة' };
       }
-      return { success: false, error: 'اسم المستخدم أو كلمة السر غير صحيحة' };
-    }
 
-    // Upgrade plaintext legacy hash on login if ever encountered
-    if (storedPass && !isPasswordEncrypted(storedPass)) {
-      const encrypted = await hashPassword(cleanPass);
-      found.password = encrypted;
-      updateUserInFirestore(found.id, { passwordHash: encrypted }).catch(() => undefined);
-    }
-
-    // Ensure login aliases and bootstrap lock stay synchronized for future reloads
-    if (authUid && found.authEmail) {
-      syncUserLoginAliases({
-        authEmail: found.authEmail,
-        username: found.username,
-        phone: found.phone
-      }).catch(() => undefined);
-      if (found.role === 'amin_khedma_am') {
-        ensureRootBootstrapLockInFirestore().catch(() => undefined);
+      // Upgrade plaintext legacy hash on login if ever encountered
+      if (storedPass && !isPasswordEncrypted(storedPass)) {
+        const encrypted = await hashPassword(cleanPass);
+        found.password = encrypted;
+        updateUserInFirestore(found.id, { passwordHash: encrypted }).catch(() => undefined);
       }
-    }
 
-    // 5. Update state & activate Tree Context Switcher
-    setUsers(prev => {
-      const exists = prev.some(u => u.id === found!.id || u.username.toLowerCase() === found!.username.toLowerCase());
-      if (exists) {
-        return prev.map(u => (u.id === found!.id || u.username.toLowerCase() === found!.username.toLowerCase()) ? found! : u);
+      // Ensure login aliases and bootstrap lock stay synchronized for future reloads
+      if (authUid && found.authEmail) {
+        syncUserLoginAliases({
+          authEmail: found.authEmail,
+          username: found.username,
+          phone: found.phone
+        }).catch(() => undefined);
+        if (found.role === 'amin_khedma_am') {
+          ensureRootBootstrapLockInFirestore(found.uid || found.id).catch(() => undefined);
+        }
       }
-      return [...prev, found!];
-    });
 
-    const isTemp = Boolean(found.isTempPassword || found.mustChangePassword);
-    setCurrentUser(found);
-    setRoleState(found.role);
-    setIsRootInitialized(true);
-    applyStageContextForUser(found);
+      // 5. Update state, activate Tree Context Switcher, and unlock Firestore subscriptions
+      setUsers(prev => {
+        const exists = prev.some(u => u.id === found!.id || u.username.toLowerCase() === found!.username.toLowerCase());
+        if (exists) {
+          return prev.map(u => (u.id === found!.id || u.username.toLowerCase() === found!.username.toLowerCase()) ? found! : u);
+        }
+        return [...prev, found!];
+      });
 
-    return { success: true, isTemp };
+      const isTemp = Boolean(found.isTempPassword || found.mustChangePassword);
+      setCurrentUser(found);
+      setRoleState(found.role);
+      setIsRootInitialized(true);
+      applyStageContextForUser(found);
+      setApprovedCurrentUserLoaded(true);
+
+      return { success: true, isTemp };
+    } finally {
+      inFlightAuthTransitionRef.current = false;
+    }
   };
 
   /**
@@ -1554,6 +1676,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
   };
 
   const logout = async () => {
+    setApprovedCurrentUserLoaded(false);
     try {
       await logoutFirebaseAuth();
     } catch (e) {
