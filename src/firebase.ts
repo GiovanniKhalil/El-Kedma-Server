@@ -32,7 +32,25 @@ export const db = initializeFirestore(
 // Initialize Firebase Authentication
 export const auth = getAuth(app);
 
-// Helper to formulate a guaranteed valid ASCII email for Firebase Authentication
+/**
+ * Generates a unique, case-independent internal Firebase Auth email
+ * (e.g. u_<uuid>@stjohn.church) completely decoupled from username casing.
+ */
+export function generateUniqueInternalAuthEmail(): string {
+  let rawId = '';
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    rawId = crypto.randomUUID().replace(/-/g, '');
+  } else if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    rawId = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+  } else {
+    rawId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+  }
+  return `u_${rawId.toLowerCase()}@stjohn.church`;
+}
+
+// Legacy helper kept only for backward compatibility with older records
 export function formatSafeChurchEmail(input: string, domain = 'stjohn.church'): string {
   const clean = input.trim().toLowerCase()
     .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
@@ -59,7 +77,7 @@ export function formatSafeFirebasePass(rawPass: string): string {
   return `${clean}_church`;
 }
 
-// Email & Password Sign In with legacy domain fallback (no stray auto-provisioning on typos)
+// Email & Password Sign In strictly using the user's resolved internal authEmail
 export async function loginWithFirebaseAuth(
   emailOrUsername: string,
   pass: string,
@@ -67,10 +85,12 @@ export async function loginWithFirebaseAuth(
 ): Promise<FirebaseUser> {
   const email = options.resolvedAuthEmail
     ? options.resolvedAuthEmail.trim().toLowerCase()
-    : formatSafeChurchEmail(emailOrUsername, options.domain || 'stjohn.church');
-  const legacyEmail = options.resolvedAuthEmail
-    ? email
-    : formatSafeChurchEmail(emailOrUsername, 'church.org');
+    : (emailOrUsername.includes('@')
+        ? emailOrUsername.trim().toLowerCase()
+        : '');
+  if (!email) {
+    throw new Error('اسم المستخدم أو كلمة السر غير صحيحة');
+  }
   const securePass = formatSafeFirebasePass(pass);
 
   try {
@@ -82,15 +102,6 @@ export async function loginWithFirebaseAuth(
       err.code === 'auth/invalid-credential' ||
       err.code === 'auth/invalid-login-credentials'
     ) {
-      // Try legacy @church.org auth account if distinct
-      if (legacyEmail !== email) {
-        try {
-          const legacyCred = await signInWithEmailAndPassword(auth, legacyEmail, securePass);
-          return legacyCred.user;
-        } catch {
-          // Handled below
-        }
-      }
       throw new Error('اسم المستخدم أو كلمة السر غير صحيحة');
     } else if (err.code === 'auth/wrong-password') {
       throw new Error('كلمة السر غير صحيحة');
@@ -101,24 +112,18 @@ export async function loginWithFirebaseAuth(
 }
 
 /**
- * Creates the Firebase Auth user strictly once during initial Root Admin bootstrap.
+ * Creates the Firebase Auth user strictly once during initial Root Admin bootstrap,
+ * using a unique internal authEmail independent of username casing.
  */
 export async function createRootFirebaseAuthUser(
-  username: string,
-  pass: string
+  _username: string,
+  pass: string,
+  explicitAuthEmail?: string
 ): Promise<{ user: FirebaseUser; authEmail: string; createdNew: boolean }> {
-  const authEmail = formatSafeChurchEmail(username, 'stjohn.church');
+  const authEmail = explicitAuthEmail?.trim().toLowerCase() || generateUniqueInternalAuthEmail();
   const securePass = formatSafeFirebasePass(pass);
-  try {
-    const cred = await createUserWithEmailAndPassword(auth, authEmail, securePass);
-    return { user: cred.user, authEmail, createdNew: true };
-  } catch (err: any) {
-    if (err?.code === 'auth/email-already-in-use') {
-      const signInCred = await signInWithEmailAndPassword(auth, authEmail, securePass);
-      return { user: signInCred.user, authEmail, createdNew: false };
-    }
-    throw err;
-  }
+  const cred = await createUserWithEmailAndPassword(auth, authEmail, securePass);
+  return { user: cred.user, authEmail, createdNew: true };
 }
 
 /**
@@ -126,10 +131,12 @@ export async function createRootFirebaseAuthUser(
  * so Amin El-Khedma El-Am does NOT lose their active admin session when approving or adding accounts.
  */
 export async function provisionFirebaseAuthUser(
-  emailOrUsername: string,
+  authEmailOrHint: string,
   pass: string
 ): Promise<string | null> {
-  const email = formatSafeChurchEmail(emailOrUsername, 'stjohn.church');
+  const email = authEmailOrHint.includes('@')
+    ? authEmailOrHint.trim().toLowerCase()
+    : generateUniqueInternalAuthEmail();
   const securePass = formatSafeFirebasePass(pass);
   try {
     const existingApp = getApps().find((a) => a.name === 'Provisioner');

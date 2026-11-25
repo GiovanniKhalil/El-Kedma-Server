@@ -221,12 +221,12 @@ export function validateUsername(
     };
   }
 
-  // 4. Uniqueness Check (Case-Insensitive)
+  // 4. Uniqueness Check (Strict Case-Sensitive ===)
   const isDuplicate = existingUsers.some(u => {
     if (!u.username) return false;
     // Exclude the user themselves if updating their own profile
-    if (currentUserId && u.id === currentUserId) return false;
-    return u.username.toLowerCase().trim() === trimmed.toLowerCase();
+    if (currentUserId && (u.id === currentUserId || (u as { uid?: string }).uid === currentUserId)) return false;
+    return u.username.trim() === trimmed;
   });
 
   if (isDuplicate) {

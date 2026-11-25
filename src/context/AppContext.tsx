@@ -54,13 +54,14 @@ import {
   checkRootBootstrapStatusFromFirestore,
   ensureRootBootstrapLockInFirestore,
   seedRootAdminOnceInFirestore,
+  doesExactUsernameAliasExist,
   resolveAuthEmailViaAlias,
   syncUserLoginAliases,
   wipeAllDatabaseFromFirestore
 } from '../services/firestoreService';
 import {
   auth,
-  formatSafeChurchEmail,
+  generateUniqueInternalAuthEmail,
   createRootFirebaseAuthUser,
   loginWithFirebaseAuth,
   provisionFirebaseAuthUser,
@@ -621,7 +622,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
           id: docId,
           uid: docId,
           username: firestoreUser.username || docId,
-          authEmail: firestoreUser.authEmail || fbUser.email || formatSafeChurchEmail(firestoreUser.username || docId, 'stjohn.church'),
+          authEmail: firestoreUser.authEmail || fbUser.email || '',
           name: firestoreUser.fullName || existingCurr?.name || firestoreUser.username || docId,
           phone: firestoreUser.phone || existingCurr?.phone || '',
           avatarUrl: firestoreUser.avatarUrl || existingCurr?.avatarUrl || '',
@@ -881,11 +882,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         return;
       }
       setUsers(prev => {
-        // Strict deduplication by cleaned phone number or uid
+        // Strict deduplication by canonical uid (preserving distinct case-sensitive accounts)
         const uniqueFirestoreUsersMap = new Map<string, typeof firestoreUsers[number]>();
         firestoreUsers.forEach(fu => {
-          const cleanPhone = fu.phone ? fu.phone.trim().replace(/\s+/g, '') : '';
-          const key = cleanPhone || fu.uid || fu.id || (fu.username || '').toLowerCase();
+          const key = fu.uid || fu.id || (fu.username || '').trim();
           if (!key) return;
 
           const existing = uniqueFirestoreUsersMap.get(key);
@@ -916,7 +916,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         prev.forEach(u => {
           if (u.password) {
             localPasswords.set(u.id, u.password);
-            if (u.username) localPasswords.set(u.username.toLowerCase(), u.password);
+            if (u.username) localPasswords.set(u.username, u.password);
           }
         });
 
@@ -925,9 +925,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         const mappedUsers: AppUser[] = dedupedFirestoreUsers.map(fu => {
           const docId = fu.uid || fu.id;
           const rawUsername = (fu.username || docId || '').trim();
-          const pass = fu.passwordHash || localPasswords.get(docId) || localPasswords.get(rawUsername.toLowerCase()) || '';
+          const pass = fu.passwordHash || localPasswords.get(docId) || localPasswords.get(rawUsername) || '';
           const prevUser = prev.find(
-            p => p.id === docId || p.username.toLowerCase() === rawUsername.toLowerCase()
+            p => p.id === docId || p.username === rawUsername
           );
 
           const firestoreStage = (fu.assignedStage || fu.assignedClass || '').trim();
@@ -957,7 +957,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
             id: docId,
             uid: docId,
             username: rawUsername,
-            authEmail: fu.authEmail || prevUser?.authEmail || formatSafeChurchEmail(rawUsername, 'stjohn.church'),
+            authEmail: fu.authEmail || prevUser?.authEmail || '',
             name: fu.fullName || prevUser?.name || rawUsername,
             phone: fu.phone || prevUser?.phone || '',
             avatarUrl: fu.avatarUrl || prevUser?.avatarUrl || '',
@@ -980,10 +980,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
           };
         });
 
-        // Deduplicate by lowercase username
+        // Deduplicate by exact case-sensitive username (===)
         const byUsername = new Map<string, AppUser>();
         for (const u of mappedUsers) {
-          const key = u.username.toLowerCase();
+          const key = u.username;
           const existing = byUsername.get(key);
           if (!existing) {
             byUsername.set(key, u);
@@ -1004,7 +1004,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         setCurrentUser(curr => {
           if (!curr) return null;
           const updated = result.find(
-            u => u.id === curr.id || u.username.toLowerCase() === curr.username.toLowerCase()
+            u => u.id === curr.id || u.username === curr.username
           );
           if (updated) {
             const merged: AppUser = {
@@ -1027,14 +1027,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         );
 
         const nextServants: Servant[] = [];
-        const seenPhones = new Set<string>();
         const seenIds = new Set<string>();
 
         directoryEligibleUsers.forEach(u => {
-          const cleanPhone = u.phone ? u.phone.trim().replace(/\s+/g, '') : '';
-          if (cleanPhone && seenPhones.has(cleanPhone)) return;
           if (seenIds.has(u.id)) return;
-          if (cleanPhone) seenPhones.add(cleanPhone);
           seenIds.add(u.id);
 
           const assignments = u.assignments || [];
@@ -1267,7 +1263,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     password: string;
   }): Promise<{ success: boolean; error?: string }> => {
     const cleanName = data.name.trim();
-    const cleanUsername = data.username.trim().toLowerCase();
+    const cleanUsername = data.username.trim();
     const cleanPhone = data.phone.trim();
     const cleanPass = data.password.trim();
 
@@ -1292,7 +1288,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     setApprovedCurrentUserLoaded(false);
 
     try {
-      const authRes = await createRootFirebaseAuthUser(cleanUsername, cleanPass);
+      const authEmail = generateUniqueInternalAuthEmail();
+      const authRes = await createRootFirebaseAuthUser(cleanUsername, cleanPass, authEmail);
       createdAuthUser = authRes.user;
       didCreateAuthUser = authRes.createdNew;
       const canonicalUid = authRes.user.uid;
@@ -1395,7 +1392,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     pass: string
   ): Promise<{ success: boolean; error?: string; isTemp?: boolean }> => {
     const cleanInput = usernameOrPhone.trim();
-    const cleanLower = cleanInput.toLowerCase();
     const cleanPass = pass.trim();
 
     if (!cleanInput || !cleanPass) {
@@ -1406,10 +1402,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     setApprovedCurrentUserLoaded(false);
 
     try {
-      // 1. Resolve canonical Firebase Auth email from local cache or zero-PII /login_aliases
+      // 1. Resolve canonical internal authEmail strictly using case-sensitive username (===) or exact phone
       const cachedUser = usersRef.current.find(
         u =>
-          u.username?.toLowerCase() === cleanLower ||
+          u.username === cleanInput ||
           (u.phone && u.phone.trim() === cleanInput) ||
           u.id === cleanInput
       );
@@ -1417,17 +1413,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       if (!resolvedAuthEmail) {
         resolvedAuthEmail = (await resolveAuthEmailViaAlias(cleanInput)) || undefined;
       }
-      const authIdentifier = cachedUser?.username || cleanLower;
 
-      // 2. Establish non-anonymous Firebase Auth session FIRST so Firestore rules permit reading /users
+      if (!resolvedAuthEmail) {
+        return { success: false, error: 'اسم المستخدم (مطابق لحالة الأحرف) أو كلمة السر غير صحيحة' };
+      }
+
+      const authIdentifier = cachedUser?.username || cleanInput;
+
+      // 2. Establish non-anonymous Firebase Auth session via the resolved internal authEmail
       let authUid: string | null = null;
-      let signedInEmail: string | undefined = resolvedAuthEmail;
+      let signedInEmail: string = resolvedAuthEmail;
       try {
         const fbUser = await loginWithFirebaseAuth(authIdentifier, cleanPass, {
           resolvedAuthEmail
         });
         authUid = fbUser.uid;
-        signedInEmail = fbUser.email || resolvedAuthEmail || formatSafeChurchEmail(authIdentifier, 'stjohn.church');
+        signedInEmail = fbUser.email || resolvedAuthEmail;
       } catch (authErr: any) {
         if (!cachedUser) {
           return { success: false, error: authErr.message || 'اسم المستخدم أو كلمة السر غير صحيحة' };
@@ -1443,6 +1444,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         }
 
         if (firestoreUser) {
+          // Enforce strict case-sensitive username check (or exact phone/uid login)
+          const inputDigits = cleanInput.replace(/\D/g, '');
+          const userPhoneDigits = (firestoreUser.phone || '').replace(/\D/g, '');
+          const isPhoneLogin = inputDigits.length >= 6 && userPhoneDigits === inputDigits && !/[a-zA-Z]/.test(cleanInput);
+          const isExactUsernameMatch = firestoreUser.username === cleanInput;
+          const isExactUidMatch = firestoreUser.uid === cleanInput;
+
+          if (!isPhoneLogin && !isExactUsernameMatch && !isExactUidMatch) {
+            if (authUid) {
+              await logoutFirebaseAuth().catch(() => undefined);
+            }
+            return { success: false, error: 'اسم المستخدم غير مطابق لحالة الأحرف (الكبيرة/الصغيرة) المسجلة.' };
+          }
+
           const docId = firestoreUser.uid;
           const rawRole = (firestoreUser.role as Role) || 'khadem';
           const effectiveStage = (firestoreUser.assignedStage || firestoreUser.assignedClass || 'عامة') as Stage;
@@ -1460,7 +1475,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
             id: docId,
             uid: docId,
             username: firestoreUser.username || authIdentifier,
-            authEmail: firestoreUser.authEmail || signedInEmail || formatSafeChurchEmail(firestoreUser.username || docId, 'stjohn.church'),
+            authEmail: firestoreUser.authEmail || signedInEmail,
             name: firestoreUser.fullName || found?.name || authIdentifier,
             phone: firestoreUser.phone || found?.phone || '',
             avatarUrl: firestoreUser.avatarUrl || found?.avatarUrl || '',
@@ -1523,9 +1538,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
 
       // 5. Update state, activate Tree Context Switcher, and unlock Firestore subscriptions
       setUsers(prev => {
-        const exists = prev.some(u => u.id === found!.id || u.username.toLowerCase() === found!.username.toLowerCase());
+        const exists = prev.some(u => u.id === found!.id || u.username === found!.username);
         if (exists) {
-          return prev.map(u => (u.id === found!.id || u.username.toLowerCase() === found!.username.toLowerCase()) ? found! : u);
+          return prev.map(u => (u.id === found!.id || u.username === found!.username) ? found! : u);
         }
         return [...prev, found!];
       });
@@ -1568,7 +1583,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     if (!usernameValidation.valid) {
       return { success: false, error: usernameValidation.error || 'اسم المستخدم غير مقبول' };
     }
-    const cleanUsername = data.username.trim().toLowerCase();
+    const cleanUsername = data.username.trim();
     const cleanPhone = data.phone.trim();
     if (!cleanPhone || cleanPhone.length < 6) {
       return { success: false, error: 'رقم الهاتف غير صالح (6 أرقام على الأقل)' };
@@ -1576,6 +1591,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
 
     try {
       await signInAnonymouslyForPendingRegistration();
+      const exactExists = await doesExactUsernameAliasExist(cleanUsername);
+      if (exactExists) {
+        await logoutFirebaseAuth().catch(() => undefined);
+        return {
+          success: false,
+          error: `اسم المستخدم "${cleanUsername}" محجوز ومسجل بالفعل لخادم آخر. يرجى اختيار اسم مستخدم مميز.`
+        };
+      }
+
       const notesCombined = [
         data.notes?.trim(),
         data.job ? `العمل: ${data.job.trim()}` : '',
@@ -1619,6 +1643,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       return { success: false, error: 'طلب التسجيل غير موجود.' };
     }
 
+    const cleanUsername = reg.username.trim();
+    const usernameCheck = validateUsername(cleanUsername, usersRef.current);
+    if (!usernameCheck.valid) {
+      return { success: false, error: usernameCheck.error || 'اسم المستخدم غير صالح أو مستخدم بالفعل.' };
+    }
+
     const stages = stagesListRef.current;
     const candidateAssignments =
       options.assignments && options.assignments.length > 0
@@ -1630,11 +1660,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       return { success: false, error: invariantError };
     }
 
-    const cleanUsername = reg.username.toLowerCase().trim();
-    const authEmail = formatSafeChurchEmail(cleanUsername, 'stjohn.church');
+    const authEmail = generateUniqueInternalAuthEmail();
     const rawTempPass = options.tempPassword?.trim() || 'temp' + Math.floor(1000 + Math.random() * 9000);
     const encryptedHash = await hashPassword(rawTempPass);
-    const provisionedUid = await provisionFirebaseAuthUser(cleanUsername, rawTempPass);
+    const provisionedUid = await provisionFirebaseAuthUser(authEmail, rawTempPass);
     const canonicalUid = provisionedUid || 'u_' + Date.now();
     const primaryStage = candidateAssignments[0]?.stageName || options.assignedStage || 'عامة';
 
@@ -1705,7 +1734,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
 
     setUsers(prev =>
       prev.map(u => {
-        if (u.id === userId || (u.username && u.username.toLowerCase() === userId.toLowerCase())) {
+        if (u.id === userId || (u.username && u.username === userId)) {
           return { ...u, password: encryptedPassword, isTempPassword: false, mustChangePassword: false };
         }
         return u;
@@ -1715,7 +1744,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     if (
       currentUserRef.current &&
       (currentUserRef.current.id === userId ||
-        currentUserRef.current.username.toLowerCase() === userId.toLowerCase())
+        currentUserRef.current.username === userId)
     ) {
       const updatedCurr: AppUser = {
         ...currentUserRef.current,
@@ -1765,8 +1794,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       return { success: false, error: invariantError };
     }
 
-    const cleanUsername = (userData.username || '').toLowerCase().trim();
-    const authEmail = formatSafeChurchEmail(cleanUsername, 'stjohn.church');
+    const cleanUsername = (userData.username || '').trim();
+    const authEmail = generateUniqueInternalAuthEmail();
     const rawPass =
       userData.password && userData.password.trim()
         ? userData.password.trim()
@@ -1774,7 +1803,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     const encryptedPassword = await hashPassword(rawPass);
 
     // Issue real Firebase Auth UID via secondary app so admin session remains intact
-    const provisionedUid = await provisionFirebaseAuthUser(cleanUsername, rawPass);
+    const provisionedUid = await provisionFirebaseAuthUser(authEmail, rawPass);
     const canonicalUid = provisionedUid || 'u_' + Date.now();
     const primaryStage = candidateAssignments[0]?.stageName || userData.assignedStage || 'عامة';
 
@@ -1841,7 +1870,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     const existingUser = usersRef.current.find(
       u =>
         u.id === id ||
-        u.username.toLowerCase() === id.toLowerCase() ||
+        u.username === id ||
         (userData.phone && u.phone && u.phone.trim() === userData.phone.trim())
     );
     const canonicalUid = existingUser?.id || id;
@@ -1893,10 +1922,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       delete updatedPayload.password;
     }
 
-    const nextUsername = (updatedPayload.username || existingUser?.username || canonicalUid).toLowerCase().trim();
+    const nextUsername = (updatedPayload.username || existingUser?.username || canonicalUid).trim();
     const canonicalAuthEmail =
       existingUser?.authEmail ||
-      formatSafeChurchEmail(existingUser?.username || nextUsername, 'stjohn.church');
+      generateUniqueInternalAuthEmail();
 
     const primaryStage =
       candidateAssignments[0]?.stageName ||
@@ -1973,7 +2002,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
   };
 
   const deleteUser = async (id: string) => {
-    const targetUser = usersRef.current.find(u => u.id === id || u.username.toLowerCase() === id.toLowerCase());
+    const targetUser = usersRef.current.find(u => u.id === id || u.username === id);
     if (targetUser?.role === 'amin_khedma_am' || targetUser?.isProtectedRoot) {
       console.warn('Cannot delete protected amin_khedma_am account');
       return;
@@ -1995,7 +2024,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
 
   const resetUserTempPassword = async (id: string, tempPass: string) => {
     const encryptedPassword = await hashPassword(tempPass.trim());
-    const targetUser = usersRef.current.find(u => u.id === id || u.username.toLowerCase() === id.toLowerCase());
+    const targetUser = usersRef.current.find(u => u.id === id || u.username === id);
     const canonicalUid = targetUser?.id || id;
 
     setUsers(prev =>
@@ -2426,9 +2455,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         : 'khadem';
 
     const tempPass = 'srv_' + Math.floor(1000 + Math.random() * 9000);
-    const cleanUsername = (servantData.phone || 'srv_' + Date.now()).replace(/[^a-zA-Z0-9_.]/g, '') || 'srv_' + Date.now();
+    const cleanUsername = ((servantData.phone || 'srv_' + Date.now()).replace(/[^a-zA-Z0-9_.]/g, '') || 'srv_' + Date.now()).trim();
+    const authEmail = generateUniqueInternalAuthEmail();
     const encryptedHash = await hashPassword(tempPass);
-    const provisionedUid = await provisionFirebaseAuthUser(cleanUsername, tempPass);
+    const provisionedUid = await provisionFirebaseAuthUser(authEmail, tempPass);
     const newId = provisionedUid || 's_' + Date.now();
 
     const assignments = buildAssignmentsForUser(
@@ -2465,7 +2495,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     try {
       await addUserToFirestore({
         uid: newId,
-        username: cleanUsername.toLowerCase(),
+        username: cleanUsername,
+        authEmail,
         passwordHash: encryptedHash,
         fullName: servantData.name,
         phone: servantData.phone || '',
@@ -2481,6 +2512,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         area: servantData.area || 'المعراج السفلي',
         notes: servantData.notes || '',
         createdAt: new Date().toISOString()
+      });
+      await syncUserLoginAliases({
+        authEmail,
+        username: cleanUsername,
+        phone: servantData.phone || ''
       });
     } catch (err) {
       console.warn('Failed to sync added servant to Firestore:', err);
@@ -2941,7 +2977,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     const protectedAuthEmail =
       adminUser?.authEmail ||
       auth.currentUser?.email ||
-      formatSafeChurchEmail(adminUser.username || adminUser.id, 'stjohn.church');
+      '';
 
     await wipeAllDatabaseFromFirestore({
       protectedRootUid: adminUser.id,
@@ -3251,7 +3287,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
 
     let nextUsername = curr.username;
     if (profileData.username !== undefined) {
-      const cleanNewUsername = profileData.username.trim().toLowerCase();
+      const cleanNewUsername = profileData.username.trim();
       const validation = validateUsername(cleanNewUsername, usersRef.current, curr.id);
       if (!validation.valid) {
         throw new Error(validation.error || 'اسم المستخدم غير صالح');
@@ -3262,7 +3298,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     const canonicalAuthEmail =
       curr.authEmail ||
       auth.currentUser?.email ||
-      formatSafeChurchEmail(curr.username || curr.id, 'stjohn.church');
+      generateUniqueInternalAuthEmail();
 
     const updatedUser: AppUser = {
       ...curr,

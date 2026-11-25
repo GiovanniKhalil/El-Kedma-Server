@@ -233,7 +233,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
     e.preventDefault();
     setGateError(null);
 
-    const cleanUser = gateUsername.trim().toLowerCase();
+    const cleanUser = gateUsername.trim();
     const cleanPass = gatePassword.trim();
 
     if (!cleanUser || !cleanPass) {
@@ -243,13 +243,13 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
 
     setGateLoading(true);
     try {
-      // Find matching user from current user or users list
-      const isCurrent = cleanUser === (currentUser?.username || '').trim().toLowerCase();
+      // Find matching user from current user or users list (strict case-sensitive username ===)
+      const isCurrent = cleanUser === (currentUser?.username || '').trim();
       const currentPassValid = isCurrent && await verifyPassword(cleanPass, currentUser?.password);
 
       // Or check if entered credentials match amin_khedma_am
       const aminUser = users.find(u => u.role === 'amin_khedma_am');
-      const isAminUser = cleanUser === (aminUser?.username || '').trim().toLowerCase();
+      const isAminUser = cleanUser === (aminUser?.username || '').trim();
       const aminPassValid = isAminUser && await verifyPassword(cleanPass, aminUser?.password);
 
       if (!currentPassValid && !aminPassValid) {

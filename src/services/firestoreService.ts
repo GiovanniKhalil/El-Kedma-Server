@@ -194,11 +194,11 @@ export function toLoginAliasId(prefix: 'u' | 'p', rawValue: string): string {
     const digits = clean.replace(/\D/g, '');
     return digits.length >= 6 ? `p_${digits}`.slice(0, 128) : '';
   }
-  const lower = clean.toLowerCase();
-  if (/^[a-z0-9._-]+$/.test(lower)) {
-    return `u_${lower}`.slice(0, 128);
+  // Strictly preserve username letter casing (e.g. u_ayman_khalil !== u_Ayman_Khalil)
+  if (/^[a-zA-Z0-9._-]+$/.test(clean)) {
+    return `u_${clean}`.slice(0, 128);
   }
-  const bytes = new TextEncoder().encode(lower);
+  const bytes = new TextEncoder().encode(clean);
   const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
   return `u_x_${hex}`.slice(0, 128);
 }
@@ -485,10 +485,9 @@ export async function batchUpdateMakhdomeenStagesInFirestore(
   }
 }
 
-// --- Users (Canonical Single Document Keyed by uid) ---
+// --- Users (Canonical Single Document Keyed by uid, Strict Case-Sensitive Username) ---
 export async function getUserFromFirestore(uidOrIdentifier: string): Promise<FirestoreUser | null> {
   const cleanId = uidOrIdentifier.trim();
-  const cleanLower = cleanId.toLowerCase();
   const path = `${COLLECTIONS.USERS}/${cleanId}`;
   try {
     // 1. Direct lookup by document ID (Auth UID or canonical ID)
@@ -497,26 +496,15 @@ export async function getUserFromFirestore(uidOrIdentifier: string): Promise<Fir
       return { ...(snap.data() as Omit<FirestoreUser, 'uid'>), uid: snap.id };
     }
 
-    if (cleanLower !== cleanId) {
-      const snapLower = await getDoc(doc(db, COLLECTIONS.USERS, cleanLower));
-      if (snapLower.exists()) {
-        return { ...(snapLower.data() as Omit<FirestoreUser, 'uid'>), uid: snapLower.id };
-      }
-    }
-
-    // 2. Query by username
-    const qUsernameLower = query(collection(db, COLLECTIONS.USERS), where('username', '==', cleanLower), limit(1));
-    const usernameLowerSnap = await getDocs(qUsernameLower);
-    if (!usernameLowerSnap.empty) {
-      const firstDoc = usernameLowerSnap.docs[0];
-      return { ...(firstDoc.data() as Omit<FirestoreUser, 'uid'>), uid: firstDoc.id };
-    }
-
+    // 2. Exact case-sensitive query by username (===)
     const qUsername = query(collection(db, COLLECTIONS.USERS), where('username', '==', cleanId), limit(1));
     const usernameSnap = await getDocs(qUsername);
     if (!usernameSnap.empty) {
       const firstDoc = usernameSnap.docs[0];
-      return { ...(firstDoc.data() as Omit<FirestoreUser, 'uid'>), uid: firstDoc.id };
+      const data = firstDoc.data() as Omit<FirestoreUser, 'uid'>;
+      if (data.username === cleanId) {
+        return { ...data, uid: firstDoc.id };
+      }
     }
 
     // 3. Query by phone
@@ -535,15 +523,15 @@ export async function getUserFromFirestore(uidOrIdentifier: string): Promise<Fir
       return { ...(firstDoc.data() as Omit<FirestoreUser, 'uid'>), uid: firstDoc.id };
     }
 
-    // 5. Fallback scan
+    // 5. Fallback scan (strict case-sensitive username equality)
     const allUsersSnap = await getDocs(collection(db, COLLECTIONS.USERS));
     for (const d of allUsersSnap.docs) {
       const data = d.data() as Omit<FirestoreUser, 'uid'>;
       if (
-        (data.username && data.username.toLowerCase() === cleanLower) ||
+        (data.username && data.username === cleanId) ||
         (data.phone && data.phone.trim() === cleanId) ||
-        (data.fullName && data.fullName.toLowerCase() === cleanLower) ||
-        d.id.toLowerCase() === cleanLower
+        (data.fullName && data.fullName === cleanId) ||
+        d.id === cleanId
       ) {
         return { ...data, uid: d.id };
       }
@@ -563,7 +551,7 @@ export async function addUserToFirestore(user: FirestoreUser): Promise<void> {
     const payload = stripUndefined({
       ...user,
       uid: canonicalUid,
-      username: (user.username || canonicalUid).toLowerCase().trim(),
+      username: (user.username || canonicalUid).trim(),
       updatedAt: new Date().toISOString()
     });
     // Single canonical document keyed strictly by uid (zero dual-writing)
@@ -627,7 +615,6 @@ export async function batchUpdateUsersInFirestore(
 
 export async function deleteUserFromFirestore(uidOrUsername: string): Promise<void> {
   const clean = uidOrUsername.trim();
-  const cleanLower = clean.toLowerCase();
   const path = `${COLLECTIONS.USERS}/${clean}`;
   const aliasRefsToDelete: DocumentReference[] = [];
   const collectAliases = (data?: Partial<FirestoreUser>) => {
@@ -644,10 +631,7 @@ export async function deleteUserFromFirestore(uidOrUsername: string): Promise<vo
       collectAliases(directSnap.data() as Partial<FirestoreUser>);
     }
     await deleteDoc(doc(db, COLLECTIONS.USERS, clean));
-    if (cleanLower !== clean) {
-      await deleteDoc(doc(db, COLLECTIONS.USERS, cleanLower));
-    }
-    const qSnap = await getDocs(query(collection(db, COLLECTIONS.USERS), where('username', '==', cleanLower)));
+    const qSnap = await getDocs(query(collection(db, COLLECTIONS.USERS), where('username', '==', clean)));
     for (const d of qSnap.docs) {
       collectAliases(d.data() as Partial<FirestoreUser>);
       await deleteDoc(d.ref);
@@ -734,7 +718,7 @@ export async function seedRootAdminOnceInFirestore(
         role: 'amin_khedma_am',
         isProtectedRoot: true,
         authEmail,
-        username: (user.username || user.uid).toLowerCase().trim(),
+        username: (user.username || user.uid).trim(),
         createdAt: user.createdAt || now,
         updatedAt: now
       })
@@ -768,6 +752,19 @@ export async function seedRootAdminOnceInFirestore(
   }
 }
 
+export async function doesExactUsernameAliasExist(username: string): Promise<boolean> {
+  const clean = (username || '').trim();
+  if (!clean) return false;
+  const uAlias = toLoginAliasId('u', clean);
+  if (!uAlias) return false;
+  try {
+    const snap = await getDoc(doc(db, COLLECTIONS.LOGIN_ALIASES, uAlias));
+    return snap.exists();
+  } catch {
+    return false;
+  }
+}
+
 export async function resolveAuthEmailViaAlias(identifier: string): Promise<string | null> {
   const clean = (identifier || '').trim();
   if (!clean) return null;
@@ -782,8 +779,12 @@ export async function resolveAuthEmailViaAlias(identifier: string): Promise<stri
     const candidateIds: string[] = [];
     const uAlias = toLoginAliasId('u', clean);
     if (uAlias) candidateIds.push(uAlias);
-    const pAlias = toLoginAliasId('p', clean);
-    if (pAlias) candidateIds.push(pAlias);
+
+    // Only attempt phone alias lookup if identifier has no username letters
+    if (!/[a-zA-Z]/.test(clean)) {
+      const pAlias = toLoginAliasId('p', clean);
+      if (pAlias) candidateIds.push(pAlias);
+    }
 
     for (const aliasId of candidateIds) {
       try {

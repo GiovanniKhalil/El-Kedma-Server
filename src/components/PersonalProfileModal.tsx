@@ -73,7 +73,7 @@ export const PersonalProfileModal: React.FC<PersonalProfileModalProps> = ({ isOp
       return;
     }
 
-    const cleanUsername = username.trim().toLowerCase();
+    const cleanUsername = username.trim();
     const usernameCheck = validateUsername(cleanUsername, users, currentUser.id);
     if (!usernameCheck.valid) {
       setErrorMsg(usernameCheck.error || 'اسم المستخدم غير صالح');
