@@ -2,7 +2,7 @@ import React from 'react';
 import { useApp } from '../context/AppContext';
 import { Child, Servant, Supervisor, AttendanceStatus, ChildEventType, StaffEventType } from '../types';
 import { 
-  X, Calendar, CheckCircle2, XCircle, Clock, AlertCircle, 
+  X, Calendar, CheckCircle2, XCircle, 
   Printer, Download, User, Church, BookOpen, Sparkles, Crown, Users
 } from 'lucide-react';
 import { getAttendanceBadgeClass, getStageBadgeClass } from '../utils/themeColors';
@@ -64,30 +64,26 @@ export const PersonAttendanceModal: React.FC<PersonAttendanceModalProps> = ({
   // Statistics
   const totalRecords = personHistory.length;
   const presentCount = personHistory.filter(h => h.status === 'present').length;
-  const lateCount = personHistory.filter(h => h.status === 'late').length;
   const absentCount = personHistory.filter(h => h.status === 'absent').length;
-  const excusedCount = personHistory.filter(h => h.status === 'excused').length;
 
   const attendanceRate = totalRecords > 0 
-    ? Math.round(((presentCount + lateCount) / totalRecords) * 100) 
+    ? Math.round((presentCount / totalRecords) * 100) 
     : 0;
 
   // Mass specific
   const massRecords = personHistory.filter(h => h.eventType === 'mass');
-  const massPresent = massRecords.filter(h => h.status === 'present' || h.status === 'late').length;
+  const massPresent = massRecords.filter(h => h.status === 'present').length;
 
   // Sunday School specific
   const ssRecords = personHistory.filter(h => h.eventType === 'sunday_school');
-  const ssPresent = ssRecords.filter(h => h.status === 'present' || h.status === 'late').length;
+  const ssPresent = ssRecords.filter(h => h.status === 'present').length;
 
   // Export to CSV
   const handleExportCSV = () => {
     const headers = ['م', 'التاريخ', 'النشاط الكنسي', 'حالة الحضور', 'ملاحظات'];
     const statusMap: Record<string, string> = {
       present: 'حاضر',
-      absent: 'غائب',
-      late: 'متأخر',
-      excused: 'معتذر'
+      absent: 'غائب'
     };
 
     const rows = personHistory.map((item, idx) => [
@@ -162,23 +158,17 @@ export const PersonAttendanceModal: React.FC<PersonAttendanceModalProps> = ({
         <div className="p-5 space-y-5 max-h-[78vh] overflow-y-auto">
           
           {/* Quick Stats Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 no-print">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 no-print">
             <div className="bg-stone-50 dark:bg-[#250d18] border border-amber-200/80 dark:border-[#3e1423] rounded-2xl p-3 text-center">
               <span className="text-[11px] font-bold text-slate-500 dark:text-stone-400 block">نسبة الحضور الكلية</span>
               <span className="text-2xl font-black text-churchgold-600 dark:text-churchgold-400 mt-0.5 block">{attendanceRate}%</span>
-              <span className="text-[10px] text-slate-400 dark:text-stone-500 font-semibold">{presentCount + lateCount} من {totalRecords} لقاء</span>
+              <span className="text-[10px] text-slate-400 dark:text-stone-500 font-semibold">{presentCount} من {totalRecords} لقاء</span>
             </div>
 
             <div className="bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 rounded-2xl p-3 text-center">
               <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 block">مرات الحضور</span>
               <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-0.5 block">{presentCount}</span>
-              <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold">حاضر في الموعد</span>
-            </div>
-
-            <div className="bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-2xl p-3 text-center">
-              <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300 block">تأخيرات وأعذار</span>
-              <span className="text-2xl font-black text-amber-600 dark:text-amber-400 mt-0.5 block">{lateCount + excusedCount}</span>
-              <span className="text-[10px] text-amber-700 dark:text-amber-400 font-semibold">{lateCount} متأخر / {excusedCount} معتذر</span>
+              <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold">حاضر</span>
             </div>
 
             <div className="bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 rounded-2xl p-3 text-center">
@@ -267,11 +257,8 @@ export const PersonAttendanceModal: React.FC<PersonAttendanceModalProps> = ({
 
                       <div className="shrink-0 self-start sm:self-auto">
                         <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black border ${getAttendanceBadgeClass(item.status)}`}>
-                          {item.status === 'present' && <CheckCircle2 className="w-3.5 h-3.5" />}
-                          {item.status === 'late' && <Clock className="w-3.5 h-3.5" />}
-                          {item.status === 'excused' && <AlertCircle className="w-3.5 h-3.5" />}
-                          {item.status === 'absent' && <XCircle className="w-3.5 h-3.5" />}
-                          <span>{item.status === 'present' ? 'حاضر' : item.status === 'late' ? 'متأخر' : item.status === 'excused' ? 'معتذر' : 'غائب'}</span>
+                          {item.status === 'present' ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                          <span>{item.status === 'present' ? 'حاضر' : 'غائب'}</span>
                         </span>
                       </div>
                     </div>

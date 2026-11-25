@@ -106,7 +106,7 @@ export function exportChildrenToXLSX(children: Child[], stageName = 'عام'): v
 }
 
 /**
- * Exports Attendance Records filtered by Month to .xlsx (Supports late status & secondary stages)
+ * Exports Attendance Records filtered by Month to .xlsx (Present vs Absent & secondary stages)
  */
 export function exportAttendanceMonthToXLSX(
   attendanceRecords: AttendanceRecord[],
@@ -159,15 +159,8 @@ export function exportAttendanceMonthToXLSX(
         mark = 'حاضر ✓';
         presentDays++;
         recordedDays++;
-      } else if (kidStatus === 'late') {
-        mark = 'متأخر ⏳';
-        presentDays++; // Count late towards present attendance
-        recordedDays++;
       } else if (kidStatus === 'absent') {
         mark = 'غائب ✗';
-        recordedDays++;
-      } else if (kidStatus === 'excused') {
-        mark = 'معتذر 💬';
         recordedDays++;
       }
       

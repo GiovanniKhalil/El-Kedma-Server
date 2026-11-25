@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { ChildEventType, AttendanceStatus } from '../types';
 import { 
-  Church, BookOpen, Sparkles, Calendar, Check, X, Clock, 
-  AlertCircle, Filter, CheckSquare, XSquare, Search, Download, 
+  Church, BookOpen, Sparkles, Calendar, Check, X,
+  Filter, CheckSquare, XSquare, Search, Download, 
   Printer, ShieldCheck, UserCheck, MessageSquare, Cross, BarChart2, History, FileSpreadsheet,
   Table, LayoutGrid, CalendarPlus, Edit2, Phone, CalendarCheck, Crown
 } from 'lucide-react';
@@ -97,20 +97,16 @@ export const ChildrenAttendanceTab: React.FC = () => {
   // Compute attendance stats based on stage-filtered
   let presentCount = 0;
   let absentCount = 0;
-  let lateCount = 0;
-  let excusedCount = 0;
   let unrecordedCount = 0;
 
   stageFilteredChildren.forEach(child => {
     const st = recordsMap[child.id]?.status;
     if (st === 'present') presentCount++;
     else if (st === 'absent') absentCount++;
-    else if (st === 'late') lateCount++;
-    else if (st === 'excused') excusedCount++;
     else unrecordedCount++;
   });
 
-  // Filter by attendance status (all / present / absent / late / excused / unrecorded)
+  // Filter by attendance status (all / present / absent / unrecorded)
   const displayedChildren = searchedChildren.filter(child => {
     const st = recordsMap[child.id]?.status;
     if (statusFilter === 'all') return true;
@@ -119,7 +115,7 @@ export const ChildrenAttendanceTab: React.FC = () => {
   });
 
   const totalStage = stageFilteredChildren.length;
-  const attendanceRate = totalStage > 0 ? Math.round(((presentCount + lateCount) / totalStage) * 100) : 0;
+  const attendanceRate = totalStage > 0 ? Math.round((presentCount / totalStage) * 100) : 0;
 
   const handleStatusChange = (childId: string, status: AttendanceStatus) => {
     const note = noteInputs[childId] || recordsMap[childId]?.note || '';
@@ -155,9 +151,7 @@ export const ChildrenAttendanceTab: React.FC = () => {
     
     const statusMap: Record<string, string> = {
       present: 'حاضر',
-      absent: 'غائب',
-      late: 'متأخر',
-      excused: 'معتذر'
+      absent: 'غائب'
     };
 
     const rows = searchedChildren.map((child, idx) => {
@@ -544,26 +538,6 @@ export const ChildrenAttendanceTab: React.FC = () => {
             حاضر: {presentCount}
           </button>
           <button 
-            onClick={() => setStatusFilter(statusFilter === 'late' ? 'all' : 'late')}
-            className={`px-3 py-1.5 rounded-xl border transition-all cursor-pointer ${
-              statusFilter === 'late'
-                ? 'bg-amber-600 text-white border-amber-400 shadow-xs'
-                : 'bg-amber-950/50 text-amber-300 border-amber-500/40 hover:bg-amber-900/50'
-            }`}
-          >
-            متأخر: {lateCount}
-          </button>
-          <button 
-            onClick={() => setStatusFilter(statusFilter === 'excused' ? 'all' : 'excused')}
-            className={`px-3 py-1.5 rounded-xl border transition-all cursor-pointer ${
-              statusFilter === 'excused'
-                ? 'bg-blue-600 text-white border-blue-400 shadow-xs'
-                : 'bg-blue-950/50 text-blue-300 border-blue-500/40 hover:bg-blue-900/50'
-            }`}
-          >
-            معتذر: {excusedCount}
-          </button>
-          <button 
             onClick={() => setStatusFilter(statusFilter === 'absent' ? 'all' : 'absent')}
             className={`px-3 py-1.5 rounded-xl border transition-all cursor-pointer ${
               statusFilter === 'absent'
@@ -605,30 +579,6 @@ export const ChildrenAttendanceTab: React.FC = () => {
           >
             <Check className="w-3.5 h-3.5" />
             <span>الحاضرين فقط ({presentCount})</span>
-          </button>
-
-          <button
-            onClick={() => setStatusFilter('late')}
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              statusFilter === 'late'
-                ? 'bg-amber-600 text-white shadow-xs'
-                : 'bg-amber-50 dark:bg-[#2a1b10] text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 hover:bg-amber-100'
-            }`}
-          >
-            <Clock className="w-3.5 h-3.5" />
-            <span>المتأخرين ({lateCount})</span>
-          </button>
-
-          <button
-            onClick={() => setStatusFilter('excused')}
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              statusFilter === 'excused'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'bg-blue-50 dark:bg-[#101b2a] text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60 hover:bg-blue-100'
-            }`}
-          >
-            <AlertCircle className="w-3.5 h-3.5" />
-            <span>المعتذرين ({excusedCount})</span>
           </button>
 
           <button
@@ -717,8 +667,7 @@ export const ChildrenAttendanceTab: React.FC = () => {
                   className={`p-3.5 sm:p-4 flex flex-col md:flex-row md:items-center justify-between gap-3.5 transition-colors ${
                     currentStatus === 'present' ? 'bg-emerald-50/50 dark:bg-emerald-950/25' :
                     currentStatus === 'absent' ? 'bg-rose-50/50 dark:bg-rose-950/25' :
-                    currentStatus === 'late' ? 'bg-amber-50/50 dark:bg-amber-950/25' :
-                    currentStatus === 'excused' ? 'bg-blue-50/50 dark:bg-blue-950/25' : 'hover:bg-amber-50/20 dark:hover:bg-[#200c17]'
+                    'hover:bg-amber-50/20 dark:hover:bg-[#200c17]'
                   }`}
                 >
                   {/* Name, Avatar & Stage */}
@@ -748,7 +697,7 @@ export const ChildrenAttendanceTab: React.FC = () => {
                   {/* Attendance Controls & Note */}
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
                     {/* Status Toggle Buttons */}
-                    <div className="grid grid-cols-4 gap-1.5 bg-stone-100 dark:bg-[#250d18] p-1 rounded-xl border border-amber-300/80 dark:border-[#4d1d2c]">
+                    <div className="grid grid-cols-2 gap-1.5 bg-stone-100 dark:bg-[#250d18] p-1 rounded-xl border border-amber-300/80 dark:border-[#4d1d2c]">
                       <button
                         type="button"
                         onClick={() => handleStatusChange(child.id, 'present')}
@@ -760,32 +709,6 @@ export const ChildrenAttendanceTab: React.FC = () => {
                       >
                         <Check className="w-4 h-4" />
                         <span>حاضر</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleStatusChange(child.id, 'late')}
-                        className={`py-2 px-3 sm:px-4 rounded-lg text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                          currentStatus === 'late'
-                            ? 'bg-amber-600 text-white shadow-xs'
-                            : 'text-slate-800 dark:text-stone-300 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40'
-                        }`}
-                      >
-                        <Clock className="w-4 h-4" />
-                        <span>متأخر</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleStatusChange(child.id, 'excused')}
-                        className={`py-2 px-3 sm:px-4 rounded-lg text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                          currentStatus === 'excused'
-                            ? 'bg-blue-600 text-white shadow-xs'
-                            : 'text-slate-800 dark:text-stone-300 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/40'
-                        }`}
-                      >
-                        <AlertCircle className="w-4 h-4" />
-                        <span>معتذر</span>
                       </button>
 
                       <button
@@ -831,7 +754,7 @@ export const ChildrenAttendanceTab: React.FC = () => {
           {searchedChildren.map((child, index) => {
             const status = recordsMap[child.id]?.status;
             const note = noteInputs[child.id] ?? (recordsMap[child.id]?.note || '');
-            const statusArabic = status === 'present' ? 'حاضر ✔' : status === 'absent' ? 'غائب ✗' : status === 'late' ? 'متأخر ⏱' : status === 'excused' ? 'معتذر 💬' : 'لم يسجل';
+            const statusArabic = status === 'present' ? 'حاضر ✔' : status === 'absent' ? 'غائب ✗' : 'لم يسجل';
             return (
               <div key={child.id} className="p-3 border border-stone-400 rounded-lg flex items-center justify-between text-xs">
                 <div className="flex items-center gap-3">

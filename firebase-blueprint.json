@@ -86,7 +86,7 @@
         "personId": { "type": "string", "description": "ID of attendee", "maxLength": 128 },
         "personType": { "type": "string", "description": "child, servant, or supervisor", "maxLength": 30 },
         "eventType": { "type": "string", "description": "Event type", "maxLength": 40 },
-        "status": { "type": "string", "description": "present, absent, late, or excused", "maxLength": 20 },
+        "status": { "type": "string", "description": "present or absent", "enum": ["present", "absent"], "maxLength": 20 },
         "recordedByUid": { "type": "string", "description": "UID of servant recording attendance", "maxLength": 128 },
         "note": { "type": "string", "description": "Optional attendance note", "maxLength": 400 }
       },

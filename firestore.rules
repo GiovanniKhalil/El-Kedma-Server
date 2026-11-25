@@ -126,7 +126,7 @@ service cloud.firestore {
         data.personId is string && data.personId.size() >= 1 && data.personId.size() <= 128 &&
         data.personType is string && data.personType in ['child', 'servant', 'supervisor'] &&
         data.eventType is string && data.eventType.size() <= 40 &&
-        data.status is string && data.status in ['present', 'absent', 'late', 'excused'] &&
+        data.status is string && data.status in ['present', 'absent'] &&
         (!('recordedByUid' in data) || (data.recordedByUid is string && data.recordedByUid.size() <= 128 && data.personId != data.recordedByUid)) &&
         (!('periodType' in data) || (data.periodType is string && data.periodType in ['weekly', 'monthly', 'seasonal_event'])) &&
         (!('note' in data) || (data.note is string && data.note.size() <= 400));

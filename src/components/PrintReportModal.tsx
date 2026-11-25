@@ -253,9 +253,6 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                   } else if (status === 'absent') {
                     recordedCount++;
                     return { date: d, status: 'absent', label: '✗ غائب' };
-                  } else if (status === 'excused') {
-                    recordedCount++;
-                    return { date: d, status: 'excused', label: '💬 معتذر' };
                   }
                   return { date: d, status: 'none', label: '—' };
                 });
@@ -297,7 +294,6 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                           className={`px-2 py-1 rounded-md text-[10px] font-bold flex items-center gap-1 border ${
                             status === 'present' ? 'bg-emerald-50 border-emerald-300 text-emerald-900' :
                             status === 'absent' ? 'bg-rose-50 border-rose-300 text-rose-900' :
-                            status === 'excused' ? 'bg-amber-50 border-amber-300 text-amber-900' :
                             'bg-stone-100 border-stone-200 text-stone-500'
                           }`}
                         >

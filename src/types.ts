@@ -114,7 +114,7 @@ export interface ChurchEventNotification {
 
 export type Announcement = ChurchEventNotification;
 
-export type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
+export type AttendanceStatus = 'present' | 'absent';
 
 /**
  * Child / Makhdoom (Record-Only, No Login)

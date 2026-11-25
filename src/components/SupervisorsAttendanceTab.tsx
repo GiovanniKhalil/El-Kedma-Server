@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { StaffEventType, AttendanceStatus } from '../types';
 import { 
-  Church, BookOpen, Users, Calendar, Check, X, Clock, 
-  AlertCircle, CheckSquare, XSquare, Crown, Briefcase,
+  Church, BookOpen, Users, Calendar, Check, X,
+  CheckSquare, XSquare, Crown, Briefcase,
   Search, Download, Printer, Filter, ShieldCheck, UserCheck,
   ChevronDown, SlidersHorizontal, ArrowUpDown,
   Table, LayoutGrid, CalendarPlus, CalendarCheck
@@ -75,22 +75,18 @@ export const SupervisorsAttendanceTab: React.FC = () => {
   // Calculate live statistics
   let presentCount = 0;
   let absentCount = 0;
-  let lateCount = 0;
-  let excusedCount = 0;
   let unrecordedCount = 0;
 
   displayedSupervisors.forEach(s => {
     const st = recordsMap[s.id]?.status;
     if (st === 'present') presentCount++;
     else if (st === 'absent') absentCount++;
-    else if (st === 'late') lateCount++;
-    else if (st === 'excused') excusedCount++;
     else unrecordedCount++;
   });
 
   const totalDisplayed = displayedSupervisors.length;
   const attendanceRate = totalDisplayed > 0 
-    ? Math.round(((presentCount + lateCount) / totalDisplayed) * 100) 
+    ? Math.round((presentCount / totalDisplayed) * 100) 
     : 0;
 
   const handleStatusChange = (supId: string, status: AttendanceStatus) => {
@@ -128,9 +124,7 @@ export const SupervisorsAttendanceTab: React.FC = () => {
     
     const statusMap: Record<string, string> = {
       present: 'حاضر',
-      absent: 'غائب',
-      late: 'متأخر',
-      excused: 'معتذر'
+      absent: 'غائب'
     };
 
     const rows = finalList.map((sup, idx) => {
@@ -465,28 +459,6 @@ export const SupervisorsAttendanceTab: React.FC = () => {
               </button>
 
               <button 
-                onClick={() => setStatusFilter(statusFilter === 'late' ? 'all' : 'late')}
-                className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${
-                  statusFilter === 'late'
-                    ? 'bg-amber-500 text-burgundy-950 border-amber-600 font-black'
-                    : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800/60'
-                }`}
-              >
-                متأخر: {lateCount}
-              </button>
-
-              <button 
-                onClick={() => setStatusFilter(statusFilter === 'excused' ? 'all' : 'excused')}
-                className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${
-                  statusFilter === 'excused'
-                    ? 'bg-blue-600 text-white border-blue-700'
-                    : 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-800/60'
-                }`}
-              >
-                معتذر: {excusedCount}
-              </button>
-
-              <button 
                 onClick={() => setStatusFilter(statusFilter === 'absent' ? 'all' : 'absent')}
                 className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${
                   statusFilter === 'absent'
@@ -595,8 +567,6 @@ export const SupervisorsAttendanceTab: React.FC = () => {
           </span>
           <div className="flex items-center gap-3 font-bold">
             <span className="text-emerald-700 dark:text-emerald-400">حاضر: {presentCount}</span>
-            <span className="text-amber-700 dark:text-amber-400">متأخر: {lateCount}</span>
-            <span className="text-blue-700 dark:text-blue-400">معتذر: {excusedCount}</span>
             <span className="text-rose-700 dark:text-rose-400">غائب: {absentCount}</span>
             <span className="font-black text-burgundy-900 dark:text-churchgold-300">نسبة الالتزام: {attendanceRate}%</span>
           </div>
@@ -632,8 +602,7 @@ export const SupervisorsAttendanceTab: React.FC = () => {
                   className={`p-3.5 sm:p-4 flex flex-col md:flex-row md:items-center justify-between gap-3.5 transition-colors ${
                     currentStatus === 'present' ? 'bg-emerald-50/50 dark:bg-emerald-950/25' :
                     currentStatus === 'absent' ? 'bg-rose-50/50 dark:bg-rose-950/25' :
-                    currentStatus === 'late' ? 'bg-amber-50/50 dark:bg-amber-950/25' :
-                    currentStatus === 'excused' ? 'bg-blue-50/50 dark:bg-blue-950/25' : 'hover:bg-amber-50/20 dark:hover:bg-[#200c17]'
+                    'hover:bg-amber-50/20 dark:hover:bg-[#200c17]'
                   }`}
                 >
                   {/* Supervisor Profile Summary */}
@@ -686,7 +655,7 @@ export const SupervisorsAttendanceTab: React.FC = () => {
                   <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 self-stretch md:self-auto shrink-0">
                     
                     {/* Status Toggle Buttons */}
-                    <div className={`grid grid-cols-4 gap-1.5 bg-stone-100 dark:bg-[#250d18] p-1 rounded-xl border border-amber-300/80 dark:border-[#4d1d2c] ${isSelfRow ? 'opacity-50 pointer-events-none' : ''}`}>
+                    <div className={`grid grid-cols-2 gap-1.5 bg-stone-100 dark:bg-[#250d18] p-1 rounded-xl border border-amber-300/80 dark:border-[#4d1d2c] ${isSelfRow ? 'opacity-50 pointer-events-none' : ''}`}>
                       <button
                         disabled={isSelfRow}
                         onClick={() => handleStatusChange(sup.id, 'present')}
@@ -701,38 +670,6 @@ export const SupervisorsAttendanceTab: React.FC = () => {
                       >
                         <Check className="w-3.5 h-3.5" />
                         <span>حاضر</span>
-                      </button>
-
-                      <button
-                        disabled={isSelfRow}
-                        onClick={() => handleStatusChange(sup.id, 'late')}
-                        className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-black transition-all ${
-                          isSelfRow ? 'cursor-not-allowed' : 'cursor-pointer'
-                        } ${
-                          currentStatus === 'late'
-                            ? 'bg-amber-600 text-white shadow-xs'
-                            : 'text-stone-700 dark:text-stone-300 hover:text-amber-700'
-                        }`}
-                        title="متأخر"
-                      >
-                        <Clock className="w-3.5 h-3.5" />
-                        <span>متأخر</span>
-                      </button>
-
-                      <button
-                        disabled={isSelfRow}
-                        onClick={() => handleStatusChange(sup.id, 'excused')}
-                        className={`flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-black transition-all ${
-                          isSelfRow ? 'cursor-not-allowed' : 'cursor-pointer'
-                        } ${
-                          currentStatus === 'excused'
-                            ? 'bg-blue-600 text-white shadow-xs'
-                            : 'text-stone-700 dark:text-stone-300 hover:text-blue-700'
-                        }`}
-                        title="معتذر"
-                      >
-                        <AlertCircle className="w-3.5 h-3.5" />
-                        <span>معتذر</span>
                       </button>
 
                       <button
@@ -782,7 +719,7 @@ export const SupervisorsAttendanceTab: React.FC = () => {
           {finalList.map((sup, index) => {
             const record = recordsMap[sup.id];
             const isAssistant = !!(sup.isAssistant || sup.roleType === 'assistant_supervisor');
-            const statusArabic = record?.status === 'present' ? 'حاضر ✔' : record?.status === 'absent' ? 'غائب ✗' : record?.status === 'late' ? 'متأخر ⏱' : record?.status === 'excused' ? 'معتذر 💬' : 'لم يسجل';
+            const statusArabic = record?.status === 'present' ? 'حاضر ✔' : record?.status === 'absent' ? 'غائب ✗' : 'لم يسجل';
             return (
               <div key={sup.id} className="p-3 border border-stone-400 rounded-lg flex items-center justify-between text-xs">
                 <div className="flex items-center gap-3">

@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext';
 import { 
   X, User, Phone, MessageCircle, MapPin, Briefcase, Calendar, 
   Cake, Edit3, Trash2, ShieldCheck, Heart, FileText, CheckCircle2,
-  Clock, AlertCircle, XCircle, Award, Home, Mail, UserCheck, Users
+  XCircle, Award, Home, Mail, UserCheck, Users
 } from 'lucide-react';
 import { getStageBadgeClass } from '../utils/themeColors';
 import { calculateAge } from '../utils/dateUtils';
@@ -53,12 +53,10 @@ export const PersonDetailsModal: React.FC<PersonDetailsModalProps> = ({
 
   const totalRecorded = personRecords.length;
   const presentCount = personRecords.filter(r => r.status === 'present').length;
-  const lateCount = personRecords.filter(r => r.status === 'late').length;
-  const excusedCount = personRecords.filter(r => r.status === 'excused').length;
   const absentCount = personRecords.filter(r => r.status === 'absent').length;
 
   const attendanceRate = totalRecorded > 0 
-    ? Math.round(((presentCount + lateCount * 0.8) / totalRecorded) * 100) 
+    ? Math.round((presentCount / totalRecorded) * 100) 
     : 0;
 
   // Birthday check
@@ -402,18 +400,10 @@ export const PersonDetailsModal: React.FC<PersonDetailsModalProps> = ({
                 </span>
               </div>
 
-              <div className="grid grid-cols-4 gap-2 text-center text-xs">
+              <div className="grid grid-cols-2 gap-2 text-center text-xs">
                 <div className="p-2 rounded-xl bg-emerald-50 dark:bg-[#12241b] border border-emerald-200/60 dark:border-emerald-900/60">
                   <div className="font-black text-emerald-700 dark:text-emerald-400">{presentCount}</div>
                   <div className="text-[10px] text-slate-500 dark:text-stone-400">حاضر</div>
-                </div>
-                <div className="p-2 rounded-xl bg-amber-50 dark:bg-[#281c10] border border-amber-200/60 dark:border-amber-900/60">
-                  <div className="font-black text-amber-700 dark:text-amber-400">{lateCount}</div>
-                  <div className="text-[10px] text-slate-500 dark:text-stone-400">متأخر</div>
-                </div>
-                <div className="p-2 rounded-xl bg-blue-50 dark:bg-[#11202e] border border-blue-200/60 dark:border-blue-900/60">
-                  <div className="font-black text-blue-700 dark:text-blue-400">{excusedCount}</div>
-                  <div className="text-[10px] text-slate-500 dark:text-stone-400">إذن</div>
                 </div>
                 <div className="p-2 rounded-xl bg-rose-50 dark:bg-[#290d16] border border-rose-200/60 dark:border-rose-900/60">
                   <div className="font-black text-rose-700 dark:text-rose-400">{absentCount}</div>

@@ -95,7 +95,7 @@ export interface FirestoreAttendance {
   personId: string;
   personType: string; // 'child' | 'servant' | 'supervisor'
   eventType: string;
-  status: string;     // 'present' | 'absent' | 'late' | 'excused'
+  status: string;     // 'present' | 'absent'
   periodType?: 'weekly' | 'monthly' | 'seasonal_event';
   recordedByUid?: string;
   note?: string;
