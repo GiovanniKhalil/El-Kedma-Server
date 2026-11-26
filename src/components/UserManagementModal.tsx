@@ -4,10 +4,12 @@ import { Role, Stage, AppUser, ClassAssignment, ClassAssignmentRole, PendingRegi
 import { 
   X, UserPlus, Users, Trash2, ShieldCheck, 
   CheckCircle2, Sparkles, RefreshCw, AlertCircle, Edit3, Crown, Save, ArrowRight,
-  Lock, KeyRound, UserCheck, Check, Database, Wifi, Server, Clock, Plus
+  Lock, KeyRound, UserCheck, Check, Database, Wifi, Server, Clock, Plus,
+  Copy, MessageCircle
 } from 'lucide-react';
 import { getStageBadgeClass } from '../utils/themeColors';
-import { validateUsername, verifyPassword } from '../utils/cryptoUtils';
+import { validateUsername, verifyPassword, generateRandomTempPassword } from '../utils/cryptoUtils';
+import { getWhatsAppHref } from '../utils/phoneHelper';
 import { testFirestoreLiveSync } from '../services/firestoreService';
 
 interface UserManagementModalProps {
@@ -94,7 +96,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
   }>({
     name: '',
     username: '',
-    tempPassword: 'temp' + Math.floor(1000 + Math.random() * 9000),
+    tempPassword: generateRandomTempPassword(),
     role: 'khadem',
     assignedStage: defaultStage,
     assignments: [{ stageId: defaultStageId, stageName: defaultStage, role: 'khadem' }],
@@ -118,6 +120,22 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
 
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
   const [actionErrorMsg, setActionErrorMsg] = useState<string | null>(null);
+
+  // Issued Credentials Summary Modal (after creating account or resetting temp password)
+  const [issuedCredentials, setIssuedCredentials] = useState<{
+    title: string;
+    name: string;
+    username: string;
+    tempPassword: string;
+    phone?: string;
+  } | null>(null);
+  const [copiedCreds, setCopiedCreds] = useState(false);
+
+  // Reset Password Modal state
+  const [userToResetPass, setUserToResetPass] = useState<AppUser | null>(null);
+  const [resetTempPassInput, setResetTempPassInput] = useState('');
+  const [resetPassError, setResetPassError] = useState<string | null>(null);
+  const [isResettingPass, setIsResettingPass] = useState(false);
 
   // Security Verification Gate state
   const [showAuthGate, setShowAuthGate] = useState(false);
@@ -361,10 +379,20 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
     e.preventDefault();
     setActionErrorMsg(null);
     setActionSuccessMsg(null);
-    if (!formData.name.trim() || !formData.username.trim() || !formData.tempPassword.trim()) return;
+    const cleanName = formData.name.trim();
+    const cleanUsername = formData.username.trim();
+    const cleanTempPass = formData.tempPassword.trim();
+    const cleanPhone = formData.phone.trim();
+
+    if (!cleanName || !cleanUsername || !cleanTempPass) return;
+
+    if (cleanTempPass.length < 6) {
+      setActionErrorMsg('يجب ألا تقل كلمة السر المؤقتة عن 6 خانات.');
+      return;
+    }
 
     // Validate username strictly per requirements
-    const usernameVal = validateUsername(formData.username.trim(), users);
+    const usernameVal = validateUsername(cleanUsername, users);
     if (!usernameVal.valid) {
       setActionErrorMsg(usernameVal.error || 'اسم المستخدم غير صالح');
       return;
@@ -385,14 +413,14 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
     setIsSubmitting(true);
     try {
       const res = await createUser({
-        name: formData.name.trim(),
-        username: formData.username.trim(),
-        password: formData.tempPassword,
+        name: cleanName,
+        username: cleanUsername,
+        password: cleanTempPass,
         role: derivedRole,
         assignedStage: primaryStage,
         assignedStages: cleanAssignments.slice(1).map(a => a.stageName),
         assignments: cleanAssignments,
-        phone: formData.phone.trim(),
+        phone: cleanPhone,
         isAdminAssistant: formData.isAdminAssistant,
         canAssignMakhdomeen: formData.isAdminAssistant ? formData.canAssignMakhdomeen : true
       });
@@ -402,13 +430,22 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
         return;
       }
 
-      setActionSuccessMsg(`✅ تم إنشاء حساب جديد لـ (${formData.name}) بنجاح!`);
+      setActionSuccessMsg(`✅ تم إنشاء حساب جديد لـ (${cleanName}) بنجاح!`);
       setTimeout(() => setActionSuccessMsg(null), 6000);
+
+      setCopiedCreds(false);
+      setIssuedCredentials({
+        title: 'تم إنشاء حساب الخادم بنجاح 🎉',
+        name: cleanName,
+        username: cleanUsername,
+        tempPassword: cleanTempPass,
+        phone: cleanPhone
+      });
 
       setFormData({
         name: '',
         username: '',
-        tempPassword: 'temp' + Math.floor(1000 + Math.random() * 9000),
+        tempPassword: generateRandomTempPassword(),
         role: 'khadem',
         assignedStage: defaultStage,
         assignments: [{ stageId: defaultStageId, stageName: defaultStage, role: 'khadem' }],
@@ -429,7 +466,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
     const existing = pendingConfig[reg.id];
     if (existing) return existing;
     return {
-      tempPassword: 'temp' + Math.floor(1000 + Math.random() * 9000),
+      tempPassword: reg.tempPassword ? '' : generateRandomTempPassword(),
       role: 'khadem' as Role,
       assignments: defaultStage
         ? [{ stageId: defaultStageId, stageName: defaultStage, role: 'khadem' as ClassAssignmentRole }]
@@ -453,6 +490,14 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
     setActionErrorMsg(null);
     setActionSuccessMsg(null);
     const cfg = getPendingState(reg);
+    const hasApplicantPass = Boolean(reg.tempPassword && reg.tempPassword.trim().length > 0);
+    const fallbackTemp = cfg.tempPassword.trim();
+
+    if (!hasApplicantPass && fallbackTemp.length < 6) {
+      setActionErrorMsg('يجب إدخال كلمة سر مؤقتة لا تقل عن 6 خانات لهذا الطلب.');
+      return;
+    }
+
     const cleanAssignments = cfg.role === 'general_dock' ? [] : cfg.assignments;
     const derivedRole = getHighestAssignmentRole(cleanAssignments, cfg.role);
     const primaryStage =
@@ -466,13 +511,29 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
         role: derivedRole,
         assignedStage: primaryStage,
         assignments: cleanAssignments,
-        tempPassword: cfg.tempPassword.trim() || undefined
+        ...(hasApplicantPass ? {} : { tempPassword: fallbackTemp })
       });
       if (!res.success) {
         setActionErrorMsg(res.error || 'تعذر اعتماد الحساب.');
         return;
       }
-      setActionSuccessMsg(`✅ تم اعتماد وتسكين حساب (${reg.fullName}) بنجاح!`);
+
+      if (!hasApplicantPass) {
+        setCopiedCreds(false);
+        setIssuedCredentials({
+          title: 'تم اعتماد الحساب بكلمة سر مؤقتة 🎉',
+          name: reg.fullName,
+          username: reg.username,
+          tempPassword: fallbackTemp,
+          phone: reg.phone
+        });
+      }
+
+      setActionSuccessMsg(
+        hasApplicantPass
+          ? `✅ تم اعتماد وتسكين حساب (${reg.fullName}) بنجاح بكلمة السر التي سجلها، ويمكنه تسجيل الدخول الآن فوراً.`
+          : `✅ تم اعتماد وتسكين حساب (${reg.fullName}) بنجاح!`
+      );
       setTimeout(() => setActionSuccessMsg(null), 6000);
     } catch (err: any) {
       setActionErrorMsg(err?.message || 'حدث خطأ أثناء اعتماد الطلب.');
@@ -619,16 +680,73 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
     );
   };
 
-  const handleResetTempPass = (userId: string, userName: string) => {
-    const newTemp = 'temp' + Math.floor(1000 + Math.random() * 9000);
-    resetUserTempPassword(userId, newTemp);
-    setActionSuccessMsg(`تم إسناد كلمة سر مؤقتة جديدة لـ (${userName}): ${newTemp}`);
-    setTimeout(() => {
-      setActionSuccessMsg(null);
-    }, 8000);
+  const openResetTempPassModal = (u: AppUser) => {
+    setUserToResetPass(u);
+    setResetTempPassInput(generateRandomTempPassword());
+    setResetPassError(null);
+  };
+
+  const handleConfirmResetTempPass = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userToResetPass) return;
+    const cleanTemp = resetTempPassInput.trim();
+    if (cleanTemp.length < 6) {
+      setResetPassError('يجب ألا تقل كلمة السر المؤقتة عن 6 خانات.');
+      return;
+    }
+
+    setResetPassError(null);
+    setIsResettingPass(true);
+    try {
+      const res = await resetUserTempPassword(userToResetPass.id, cleanTemp);
+      if (!res.success) {
+        setResetPassError(res.error || 'تعذر تحديث كلمة السر المؤقتة.');
+        return;
+      }
+
+      const target = userToResetPass;
+      setUserToResetPass(null);
+      setCopiedCreds(false);
+      setIssuedCredentials({
+        title: 'تم تصفير كلمة السر بنجاح 🔑',
+        name: target.name,
+        username: target.username,
+        tempPassword: cleanTemp,
+        phone: target.phone
+      });
+      setActionSuccessMsg(`✅ تم تحديث كلمة السر المؤقتة لحساب (${target.name}) في Firebase بنجاح.`);
+      setTimeout(() => setActionSuccessMsg(null), 6000);
+    } catch (err: any) {
+      setResetPassError(err?.message || 'حدث خطأ أثناء تصفير كلمة السر.');
+    } finally {
+      setIsResettingPass(false);
+    }
+  };
+
+  const copyCredentialsText = async (creds: { name: string; username: string; tempPassword: string }) => {
+    const text = `بيانات الدخول لخدمة كنيسة ماريوحنا بالمعراج:\nالاسم: ${creds.name}\nاسم المستخدم: ${creds.username}\nكلمة السر المؤقتة: ${creds.tempPassword}\n(يُرجى تغيير كلمة السر عند أول تسجيل دخول)`;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopiedCreds(true);
+      setTimeout(() => setCopiedCreds(false), 2500);
+    } catch {
+      // ignore clipboard restrictions
+    }
   };
 
   const aminKhedmaUser = users.find(u => u.role === 'amin_khedma_am');
+  const servantUsersList = users.filter(u => u.role !== 'amin_khedma_am' && !u.isProtectedRoot);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs overflow-y-auto">
@@ -852,91 +970,92 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
               </div>
 
               <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
-                {users.map(u => {
-                  const isSelf = currentUser?.id === u.id;
-                  const isAminAm = u.role === 'amin_khedma_am';
-                  return (
-                    <div key={u.id} className="p-3.5 rounded-2xl bg-white dark:bg-[#240b17] border border-amber-200/80 dark:border-[#3e1423] hover:border-amber-300 dark:hover:border-[#4d1d2c] shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-colors">
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-slate-900 dark:text-stone-100 text-sm">{u.name}</span>
-                          {u.isAdminAssistant && (
-                            <span className="px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800 text-[10px] font-black">
-                              مساعد أمين عام
-                            </span>
-                          )}
-                          {u.assignedStage === 'في انتظار التعيين' && (
-                            <span className="px-2 py-0.5 rounded-md bg-amber-500 text-burgundy-950 text-[10px] font-black border border-amber-400">
-                              ⏳ في انتظار تعيين المرحلة
-                            </span>
-                          )}
-                          {u.isTempPassword && (
-                            <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-[#341121] text-amber-800 dark:text-churchgold-300 border border-amber-200 dark:border-[#4d1d2c] text-[10px] font-bold">
-                              كلمة سر مؤقتة
-                            </span>
-                          )}
-                          {isSelf && (
-                            <span className="px-2 py-0.5 rounded-md bg-churchgold-100 dark:bg-churchgold-950/40 text-churchgold-900 dark:text-churchgold-300 border border-churchgold-300 text-[10px] font-bold">
-                              أنت (الحالي)
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-slate-500 dark:text-stone-400 text-[11px] mt-0.5 flex flex-wrap items-center gap-1.5">
-                          <span>اسم المستخدم: <strong className="text-slate-700 dark:text-stone-300 font-mono">@{u.username}</strong></span>
-                          <span>•</span>
-                          <span>الصفة: {ROLE_ARABIC_MAP[u.role] || 'خادم'}</span>
-                          <span>•</span>
-                          {u.assignments && u.assignments.length > 0 ? (
-                            u.assignments.map((a, idx) => (
-                              <span key={`${a.stageName}-${idx}`} className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${getStageBadgeClass(a.stageName)}`}>
-                                {a.stageName} ({ROLE_ARABIC_MAP[a.role] || 'خادم'})
+                {servantUsersList.length === 0 ? (
+                  <div className="p-6 text-center rounded-2xl bg-stone-50 dark:bg-[#200a14] border border-dashed border-amber-300/70 dark:border-[#3e1423] text-xs font-bold text-slate-500 dark:text-stone-400">
+                    لا توجد حسابات خدام مضافة حالياً بخلاف حساب أمين الخدمة العام أعلاه.
+                  </div>
+                ) : (
+                  servantUsersList.map(u => {
+                    const isSelf = currentUser?.id === u.id;
+                    return (
+                      <div key={u.id} className="p-3.5 rounded-2xl bg-white dark:bg-[#240b17] border border-amber-200/80 dark:border-[#3e1423] hover:border-amber-300 dark:hover:border-[#4d1d2c] shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-colors">
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-slate-900 dark:text-stone-100 text-sm">{u.name}</span>
+                            {u.isAdminAssistant && (
+                              <span className="px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800 text-[10px] font-black">
+                                مساعد أمين عام
                               </span>
-                            ))
-                          ) : (
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${getStageBadgeClass(u.assignedStage)}`}>
-                              {u.assignedStage}
-                            </span>
+                            )}
+                            {u.assignedStage === 'في انتظار التعيين' && (
+                              <span className="px-2 py-0.5 rounded-md bg-amber-500 text-burgundy-950 text-[10px] font-black border border-amber-400">
+                                ⏳ في انتظار تعيين المرحلة
+                              </span>
+                            )}
+                            {u.isTempPassword && (
+                              <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-[#341121] text-amber-800 dark:text-churchgold-300 border border-amber-200 dark:border-[#4d1d2c] text-[10px] font-bold">
+                                كلمة سر مؤقتة
+                              </span>
+                            )}
+                            {isSelf && (
+                              <span className="px-2 py-0.5 rounded-md bg-churchgold-100 dark:bg-churchgold-950/40 text-churchgold-900 dark:text-churchgold-300 border border-churchgold-300 text-[10px] font-bold">
+                                أنت (الحالي)
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-slate-500 dark:text-stone-400 text-[11px] mt-0.5 flex flex-wrap items-center gap-1.5">
+                            <span>اسم المستخدم: <strong className="text-slate-700 dark:text-stone-300 font-mono">@{u.username}</strong></span>
+                            <span>•</span>
+                            <span>الصفة: {ROLE_ARABIC_MAP[u.role] || 'خادم'}</span>
+                            <span>•</span>
+                            {u.assignments && u.assignments.length > 0 ? (
+                              u.assignments.map((a, idx) => (
+                                <span key={`${a.stageName}-${idx}`} className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${getStageBadgeClass(a.stageName)}`}>
+                                  {a.stageName} ({ROLE_ARABIC_MAP[a.role] || 'خادم'})
+                                </span>
+                              ))
+                            ) : (
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${getStageBadgeClass(u.assignedStage)}`}>
+                                {u.assignedStage}
+                              </span>
+                            )}
+                            {u.phone && <span>• 📞 {u.phone}</span>}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                          <button
+                            onClick={() => startEditing(u)}
+                            className="px-2.5 py-1.5 rounded-xl bg-stone-100 dark:bg-[#2e101d] hover:bg-amber-100/70 dark:hover:bg-[#3e1528] text-slate-800 dark:text-churchgold-300 border border-amber-200/80 dark:border-[#4d1d2c] font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
+                            title="تعديل بيانات الحساب"
+                          >
+                            <Edit3 className="w-3.5 h-3.5 text-churchgold-600" />
+                            <span>تعديل</span>
+                          </button>
+
+                          <button
+                            onClick={() => openResetTempPassModal(u)}
+                            className="px-2.5 py-1.5 rounded-xl bg-amber-50 dark:bg-[#341121] hover:bg-amber-100 dark:hover:bg-[#4d1d2c] text-amber-900 dark:text-churchgold-300 border border-amber-200 dark:border-[#4d1d2c] font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
+                            title="تعيين كلمة سر مؤقتة جديدة"
+                          >
+                            <RefreshCw className="w-3 h-3 text-churchgold-600" />
+                            <span>تصفير السر</span>
+                          </button>
+
+                          {!isSelf && (
+                            <button
+                              onClick={() => setUserToDelete(u)}
+                              className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer transition-colors"
+                              title="حذف الحساب"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           )}
-                          {u.phone && <span>• 📞 {u.phone}</span>}
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-                        <button
-                          onClick={() => startEditing(u)}
-                          className="px-2.5 py-1.5 rounded-xl bg-stone-100 dark:bg-[#2e101d] hover:bg-amber-100/70 dark:hover:bg-[#3e1528] text-slate-800 dark:text-churchgold-300 border border-amber-200/80 dark:border-[#4d1d2c] font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
-                          title="تعديل بيانات الحساب"
-                        >
-                          <Edit3 className="w-3.5 h-3.5 text-churchgold-600" />
-                          <span>تعديل</span>
-                        </button>
-
-                        <button
-                          onClick={() => handleResetTempPass(u.id, u.name)}
-                          className="px-2.5 py-1.5 rounded-xl bg-amber-50 dark:bg-[#341121] hover:bg-amber-100 dark:hover:bg-[#4d1d2c] text-amber-900 dark:text-churchgold-300 border border-amber-200 dark:border-[#4d1d2c] font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
-                          title="إسناد كلمة سر مؤقتة جديدة"
-                        >
-                          <RefreshCw className="w-3 h-3 text-churchgold-600" />
-                          <span>تصفير السر</span>
-                        </button>
-
-                        {!isSelf && !isAminAm ? (
-                          <button
-                            onClick={() => setUserToDelete(u)}
-                            className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer transition-colors"
-                            title="حذف الحساب"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        ) : isAminAm ? (
-                          <span className="text-[10px] text-amber-800 dark:text-churchgold-400 font-bold px-2 py-1 rounded-lg bg-amber-100/70 dark:bg-[#321220] border border-amber-300 dark:border-[#4d1d2c]" title="حساب ثابت لا يتغير ولا يمكن حذفه">
-                            ثابت 🛡️
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
             </div>
           ) : activeSubTab === 'pending' ? (
@@ -977,13 +1096,41 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="block font-bold mb-1 text-slate-800 dark:text-stone-200">كلمة السر المؤقتة للدخول الأول *</label>
-                          <input
-                            type="text"
-                            value={cfg.tempPassword}
-                            onChange={(e) => updatePendingState(reg, { tempPassword: e.target.value })}
-                            className="w-full bg-amber-50/80 dark:bg-[#341121] border border-amber-300 dark:border-[#4d1d2c] text-amber-900 dark:text-churchgold-300 font-mono font-bold rounded-xl px-3 py-2 text-xs focus:outline-none"
-                          />
+                          {reg.tempPassword ? (
+                            <div className="h-full p-2.5 rounded-xl bg-emerald-50/90 dark:bg-emerald-950/30 border border-emerald-300/80 dark:border-emerald-800/70 text-emerald-900 dark:text-emerald-200 flex items-center gap-2">
+                              <KeyRound className="w-4 h-4 shrink-0 text-emerald-600" />
+                              <div className="text-[11px] leading-snug">
+                                <span className="font-black block">كلمة المرور محددة من الخادم عند التسجيل</span>
+                                <span className="opacity-85">سيدخل بحسابه مباشرةً فور الاعتماد وسيُحذف الطلب المعلق تلقائياً.</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div>
+                              <label className="block font-bold mb-1 text-slate-800 dark:text-stone-200">
+                                كلمة السر المؤقتة للدخول الأول (6 خانات+) *
+                              </label>
+                              <div className="flex items-center gap-1.5">
+                                <input
+                                  type="text"
+                                  minLength={6}
+                                  value={cfg.tempPassword}
+                                  onChange={(e) => updatePendingState(reg, { tempPassword: e.target.value })}
+                                  placeholder="6 خانات على الأقل..."
+                                  className="flex-1 bg-amber-50/80 dark:bg-[#341121] border border-amber-300 dark:border-[#4d1d2c] text-amber-900 dark:text-churchgold-300 font-mono font-bold rounded-xl px-3 py-2 text-xs focus:outline-none"
+                                  dir="ltr"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => updatePendingState(reg, { tempPassword: generateRandomTempPassword() })}
+                                  className="px-2.5 py-2 rounded-xl bg-amber-100 hover:bg-amber-200 dark:bg-[#3b1525] dark:hover:bg-[#4d1d2c] text-amber-900 dark:text-churchgold-300 font-bold text-[11px] flex items-center gap-1 cursor-pointer shrink-0 border border-amber-300/80 dark:border-[#4d1d2c]"
+                                  title="توليد كلمة سر مؤقتة عشوائية"
+                                >
+                                  <RefreshCw className="w-3.5 h-3.5" />
+                                  <span>توليد عشوائي</span>
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         <div>
@@ -1217,16 +1364,31 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block font-bold mb-1 text-slate-800 dark:text-stone-200">كلمة السر المؤقتة *</label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.tempPassword}
-                    onChange={(e) => setFormData({ ...formData, tempPassword: e.target.value })}
-                    className="w-full bg-amber-50/80 dark:bg-[#341121] border border-amber-300 dark:border-[#4d1d2c] text-amber-900 dark:text-churchgold-300 font-mono font-bold rounded-xl px-3 py-2 text-sm focus:outline-none"
-                  />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block font-bold mb-1 text-slate-800 dark:text-stone-200">
+                    كلمة السر المؤقتة (6 خانات على الأقل) *
+                  </label>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <input
+                      type="text"
+                      required
+                      minLength={6}
+                      value={formData.tempPassword}
+                      onChange={(e) => setFormData({ ...formData, tempPassword: e.target.value })}
+                      placeholder="أدخل كلمة سر مؤقتة يدوياً (6 خانات على الأقل)..."
+                      className="flex-1 bg-amber-50/80 dark:bg-[#341121] border border-amber-300 dark:border-[#4d1d2c] text-amber-900 dark:text-churchgold-300 font-mono font-bold rounded-xl px-3 py-2 text-sm focus:outline-none"
+                      dir="ltr"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, tempPassword: generateRandomTempPassword() })}
+                      className="px-3.5 py-2 rounded-xl bg-amber-100 hover:bg-amber-200 dark:bg-[#381424] dark:hover:bg-[#4d1d2c] text-amber-950 dark:text-churchgold-300 border border-amber-300 dark:border-[#5a2237] font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors shrink-0"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 text-churchgold-600" />
+                      <span>توليد كلمة سر مؤقتة عشوائية</span>
+                    </button>
+                  </div>
                 </div>
 
                 <div>
@@ -1519,6 +1681,189 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
           </div>
         </div>
       )}
+
+      {/* MODAL 4: Reset Temporary Password Input Dialog */}
+      {userToResetPass && (
+        <div className="fixed inset-0 z-70 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#1a0812] rounded-3xl max-w-md w-full shadow-2xl border-2 border-amber-400 dark:border-amber-600 overflow-hidden">
+            <div className="bg-gradient-to-r from-burgundy-950 via-burgundy-900 to-burgundy-950 p-4 sm:p-5 text-white flex items-center justify-between border-b border-churchgold-400/20">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-500 text-burgundy-950 font-black">
+                  <KeyRound className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm sm:text-base font-black text-amber-50">تصفير كلمة السر المؤقتة</h4>
+                  <p className="text-[11px] text-churchgold-300">تحديث مباشر في Firebase Authentication</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setUserToResetPass(null)}
+                className="p-1.5 rounded-xl hover:bg-white/10 text-amber-200/80 hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmResetTempPass} className="p-5 space-y-4 text-xs text-slate-700 dark:text-stone-300">
+              <div className="p-3 rounded-2xl bg-amber-50/80 dark:bg-[#260e19] border border-amber-200 dark:border-[#4d1d2c] space-y-1">
+                <div className="font-black text-slate-900 dark:text-stone-100 text-sm">{userToResetPass.name}</div>
+                <div className="text-[11px] text-slate-600 dark:text-stone-400 font-mono">@{userToResetPass.username}</div>
+                <p className="text-[11px] text-amber-900 dark:text-churchgold-300 pt-1">
+                  سيُطلب من الخادم تغيير كلمة السر المؤقتة فور تسجيل دخوله القادم.
+                </p>
+              </div>
+
+              {resetPassError && (
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-700 text-rose-800 dark:text-rose-200 text-xs font-bold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                  <span>{resetPassError}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block font-bold mb-1.5 text-slate-800 dark:text-stone-200">
+                  كلمة السر المؤقتة الجديدة (6 خانات على الأقل) *
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    required
+                    minLength={6}
+                    value={resetTempPassInput}
+                    onChange={(e) => setResetTempPassInput(e.target.value)}
+                    placeholder="أدخل 6 خانات على الأقل..."
+                    className="flex-1 bg-amber-50/80 dark:bg-[#341121] border border-amber-300 dark:border-[#4d1d2c] text-amber-900 dark:text-churchgold-300 font-mono font-bold rounded-xl px-3 py-2.5 text-sm focus:outline-none"
+                    dir="ltr"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setResetTempPassInput(generateRandomTempPassword())}
+                    className="px-3 py-2.5 rounded-xl bg-amber-100 hover:bg-amber-200 dark:bg-[#381424] dark:hover:bg-[#4d1d2c] text-amber-950 dark:text-churchgold-300 border border-amber-300 dark:border-[#5a2237] font-black text-xs flex items-center gap-1 cursor-pointer shrink-0"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 text-churchgold-600" />
+                    <span>توليد عشوائي</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-amber-100 dark:border-[#341121]">
+                <button
+                  type="button"
+                  disabled={isResettingPass}
+                  onClick={() => setUserToResetPass(null)}
+                  className="px-4 py-2 rounded-xl bg-stone-100 dark:bg-[#250d18] hover:bg-stone-200 dark:hover:bg-[#341121] text-slate-700 dark:text-stone-300 font-bold cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isResettingPass}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-churchgold-600 hover:from-amber-600 hover:to-churchgold-700 text-burgundy-950 font-black flex items-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+                >
+                  <KeyRound className="w-4 h-4" />
+                  <span>{isResettingPass ? 'جاري التحديث...' : 'حفظ وتعيين كلمة السر'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: Issued Temporary Credentials Card (Copy + WhatsApp Share) */}
+      {issuedCredentials && (() => {
+        const waMessage = `سلام ونعمة يا ${issuedCredentials.name}،\nبيانات الدخول الخاصة بك في منظومة خدمة كنيسة ماريوحنا بالمعراج:\n• اسم المستخدم: ${issuedCredentials.username}\n• كلمة السر المؤقتة: ${issuedCredentials.tempPassword}\n(يُرجى تغيير كلمة السر عند أول تسجيل دخول)`;
+        const waHref = getWhatsAppHref(issuedCredentials.phone, waMessage);
+
+        return (
+          <div className="fixed inset-0 z-80 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-xs animate-in fade-in duration-200">
+            <div className="bg-white dark:bg-[#1a0812] rounded-3xl max-w-md w-full shadow-2xl border-2 border-emerald-400 dark:border-emerald-700 overflow-hidden">
+              <div className="bg-gradient-to-r from-emerald-700 via-emerald-800 to-teal-900 p-4 sm:p-5 text-white flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-white/15 text-emerald-100">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm sm:text-base font-black text-white">{issuedCredentials.title}</h4>
+                    <p className="text-[11px] text-emerald-100/90">احفظ البيانات أو أرسلها للخادم مباشرةً</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIssuedCredentials(null)}
+                  className="p-1.5 rounded-xl hover:bg-white/10 text-emerald-100 hover:text-white cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4 text-xs">
+                <div className="p-4 rounded-2xl bg-stone-50 dark:bg-[#240b17] border border-amber-200/80 dark:border-[#4d1d2c] space-y-3">
+                  <div>
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-stone-400 block">اسم الخادم</span>
+                    <span className="text-sm font-black text-slate-900 dark:text-stone-100">{issuedCredentials.name}</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2 border-t border-amber-100 dark:border-[#381421]">
+                    <div className="p-2.5 rounded-xl bg-white dark:bg-[#1a0812] border border-stone-200 dark:border-[#3e1423]">
+                      <span className="text-[10px] font-bold text-slate-500 dark:text-stone-400 block mb-0.5">اسم المستخدم (Username)</span>
+                      <span className="text-sm font-mono font-black text-burgundy-900 dark:text-churchgold-300 select-all" dir="ltr">
+                        {issuedCredentials.username}
+                      </span>
+                    </div>
+
+                    <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-[#311220] border border-amber-300 dark:border-amber-700">
+                      <span className="text-[10px] font-bold text-amber-800 dark:text-amber-300 block mb-0.5">كلمة السر المؤقتة</span>
+                      <span className="text-sm font-mono font-black text-amber-950 dark:text-churchgold-200 select-all" dir="ltr">
+                        {issuedCredentials.tempPassword}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 text-amber-900 dark:text-amber-200 text-[11px] font-bold">
+                  سيُطلب من الخادم تعيين كلمة سر شخصية جديدة فور تسجيل دخوله الأول بهذه البيانات.
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => copyCredentialsText(issuedCredentials)}
+                    className="flex-1 py-2.5 px-3.5 rounded-xl bg-burgundy-900 hover:bg-burgundy-950 text-churchgold-100 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-sm transition-colors"
+                  >
+                    {copiedCreds ? <Check className="w-4 h-4 text-emerald-300" /> : <Copy className="w-4 h-4 text-churchgold-300" />}
+                    <span>{copiedCreds ? 'تم نسخ البيانات ✓' : 'نسخ البيانات'}</span>
+                  </button>
+
+                  {waHref ? (
+                    <a
+                      href={waHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 py-2.5 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      <span>إرسال عبر واتساب</span>
+                    </a>
+                  ) : (
+                    <span className="flex-1 py-2 px-3 rounded-xl bg-stone-100 dark:bg-[#250d18] text-slate-500 dark:text-stone-400 text-[11px] font-bold text-center border border-stone-200 dark:border-[#3e1423]">
+                      لا يوجد رقم هاتف مسجل للواتساب
+                    </span>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIssuedCredentials(null)}
+                  className="w-full py-2 rounded-xl bg-stone-100 dark:bg-[#250d18] hover:bg-stone-200 dark:hover:bg-[#341121] text-slate-700 dark:text-stone-300 font-bold text-xs cursor-pointer transition-colors"
+                >
+                  تم، إغلاق النافذة
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

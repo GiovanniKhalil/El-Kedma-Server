@@ -6,20 +6,21 @@ import {
   Search, ShieldCheck, Plus, Phone, MessageCircle, 
   Edit3, Trash2, Download, Printer, User, BarChart2, Filter, X,
   UserX, CheckCircle2, KeyRound, Crown, Users, Check,
-  Clock, AlertCircle
+  Clock, AlertCircle, RefreshCw, Copy
 } from 'lucide-react';
 import { PersonAttendanceModal } from './PersonAttendanceModal';
 import { PersonDetailsModal } from './PersonDetailsModal';
 import { PrintReportModal } from './PrintReportModal';
 import { getStageBadgeClass } from '../utils/themeColors';
 import { getWhatsAppHref } from '../utils/phoneHelper';
+import { generateRandomTempPassword } from '../utils/cryptoUtils';
 
 export const ServantsDirectoryTab: React.FC<{
   onAddServant: () => void;
   onEditServant: (servant: Servant) => void;
 }> = ({ onAddServant, onEditServant }) => {
   const { 
-    servants, deleteServant, selectedStageScope, activeStageName,
+    servants, users, deleteServant, selectedStageScope, activeStageName,
     role, currentUser, stagesList, resetUserTempPassword,
     moveServantsToGeneralDock, assignServantRole 
   } = useApp();
@@ -35,7 +36,13 @@ export const ServantsDirectoryTab: React.FC<{
   const [viewingAttendanceServant, setViewingAttendanceServant] = useState<Servant | null>(null);
   const [selectedDetailsServant, setSelectedDetailsServant] = useState<Servant | null>(null);
   const [unassignSuccessMsg, setUnassignSuccessMsg] = useState<string | null>(null);
-  const [resetNotice, setResetNotice] = useState<{ servantName: string; tempPass: string } | null>(null);
+  const [resetNotice, setResetNotice] = useState<{
+    servantName: string;
+    username: string;
+    phone?: string;
+    tempPass: string;
+  } | null>(null);
+  const [copiedResetNotice, setCopiedResetNotice] = useState(false);
 
   // Reallocation Modal State for Individual Servant
   const [reassignModalServant, setReassignModalServant] = useState<Servant | null>(null);
@@ -52,9 +59,14 @@ export const ServantsDirectoryTab: React.FC<{
   const [dockFilterTab, setDockFilterTab] = useState<'all' | 'assigned' | 'dock'>('all');
   const [servantToDelete, setServantToDelete] = useState<Servant | null>(null);
   const [servantToResetPass, setServantToResetPass] = useState<Servant | null>(null);
+  const [resetPassInput, setResetPassInput] = useState('');
+  const [resetPassError, setResetPassError] = useState<string | null>(null);
+  const [isResettingPass, setIsResettingPass] = useState(false);
 
   const handleResetPassword = (servant: Servant) => {
     setServantToResetPass(servant);
+    setResetPassInput(generateRandomTempPassword());
+    setResetPassError(null);
   };
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -332,17 +344,56 @@ export const ServantsDirectoryTab: React.FC<{
         </button>
       </div>
 
-      {resetNotice && (
-        <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-[#2c131f] border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-churchgold-300 text-xs font-bold flex items-center justify-between animate-in fade-in">
-          <div className="flex items-center gap-2">
-            <KeyRound className="w-4 h-4 text-amber-600 shrink-0" />
-            <span>
-              تم تصفير كلمة سر الخادم (<strong>{resetNotice.servantName}</strong>) بنجاح! كلمة السر المؤقتة: <span className="font-mono bg-amber-200/60 dark:bg-amber-950/80 px-2 py-0.5 rounded-md font-black">{resetNotice.tempPass}</span>.
-            </span>
+      {resetNotice && (() => {
+        const msg = `سلام ونعمة يا ${resetNotice.servantName}،\nتم تعيين كلمة سر مؤقتة جديدة لحسابك في منظومة خدمة كنيسة ماريوحنا بالمعراج:\n• اسم المستخدم: ${resetNotice.username}\n• كلمة السر المؤقتة: ${resetNotice.tempPass}\n(يُرجى تغيير كلمة السر عند أول تسجيل دخول)`;
+        const waHref = getWhatsAppHref(resetNotice.phone, msg);
+        return (
+          <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-[#2c131f] border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-churchgold-300 text-xs font-bold flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 animate-in fade-in">
+            <div className="flex items-start gap-2">
+              <KeyRound className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <div>
+                  تم تصفير كلمة سر الخادم (<strong>{resetNotice.servantName}</strong>) بنجاح!
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                  <span>اسم المستخدم: <strong className="font-mono select-all" dir="ltr">{resetNotice.username}</strong></span>
+                  <span>• كلمة السر المؤقتة: <span className="font-mono bg-amber-200/70 dark:bg-amber-950/80 px-2 py-0.5 rounded-md font-black select-all" dir="ltr">{resetNotice.tempPass}</span></span>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(msg);
+                    setCopiedResetNotice(true);
+                    setTimeout(() => setCopiedResetNotice(false), 2500);
+                  } catch {
+                    // ignore
+                  }
+                }}
+                className="px-2.5 py-1.5 rounded-xl bg-burgundy-900 text-churchgold-100 hover:bg-burgundy-950 text-[11px] font-black flex items-center gap-1 cursor-pointer"
+              >
+                {copiedResetNotice ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedResetNotice ? 'تم النسخ' : 'نسخ'}</span>
+              </button>
+              {waHref && (
+                <a
+                  href={waHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black flex items-center gap-1"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>واتساب</span>
+                </a>
+              )}
+              <button onClick={() => setResetNotice(null)} className="text-amber-700 dark:text-churchgold-400 hover:text-amber-900 cursor-pointer px-1">✕</button>
+            </div>
           </div>
-          <button onClick={() => setResetNotice(null)} className="text-amber-700 dark:text-churchgold-400 hover:text-amber-900 cursor-pointer">✕</button>
-        </div>
-      )}
+        );
+      })()}
 
       {unassignSuccessMsg && (
         <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200 text-xs font-bold flex items-center gap-2 animate-in fade-in">
@@ -917,28 +968,81 @@ export const ServantsDirectoryTab: React.FC<{
               </div>
               <div>
                 <h4 className="text-base font-bold text-stone-900 dark:text-stone-100">تصفير كلمة سر الخادم</h4>
-                <p className="text-xs text-stone-500 dark:text-stone-400">إجراء أمني لإدارة الحسابات</p>
+                <p className="text-xs text-stone-500 dark:text-stone-400">تحديث مباشر في Firebase Authentication</p>
               </div>
             </div>
 
-            <p className="text-sm text-stone-700 dark:text-stone-300 bg-amber-50/50 dark:bg-amber-950/30 p-3.5 rounded-2xl border border-amber-100 dark:border-amber-900/40">
-              هل ترغب في تصفير كلمة سر الخادم <strong className="text-amber-800 dark:text-amber-300 font-bold">"{servantToResetPass.name}"</strong>؟ سيتم تعيين كلمة مرور مؤقتة وتفعيل إجبارية تغيير كلمة المرور فور تسجيل دخوله القادم.
+            <p className="text-xs text-stone-700 dark:text-stone-300 bg-amber-50/50 dark:bg-amber-950/30 p-3.5 rounded-2xl border border-amber-100 dark:border-amber-900/40 leading-relaxed">
+              تعيين كلمة سر مؤقتة جديدة للخادم <strong className="text-amber-800 dark:text-amber-300 font-bold">"{servantToResetPass.name}"</strong> مع تفعيل إجبارية التغيير فور تسجيل دخوله القادم.
             </p>
+
+            {resetPassError && (
+              <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-300 text-rose-800 dark:text-rose-200 text-xs font-bold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{resetPassError}</span>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-bold mb-1.5 text-stone-800 dark:text-stone-200">
+                كلمة السر المؤقتة (6 خانات على الأقل) *
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  minLength={6}
+                  value={resetPassInput}
+                  onChange={(e) => setResetPassInput(e.target.value)}
+                  placeholder="أدخل 6 خانات على الأقل..."
+                  className="flex-1 bg-amber-50/80 dark:bg-[#2a101b] border border-amber-300 dark:border-[#4d1d2c] text-amber-950 dark:text-churchgold-300 font-mono font-bold rounded-xl px-3 py-2 text-xs focus:outline-none"
+                  dir="ltr"
+                />
+                <button
+                  type="button"
+                  onClick={() => setResetPassInput(generateRandomTempPassword())}
+                  className="px-2.5 py-2 rounded-xl bg-amber-100 hover:bg-amber-200 dark:bg-[#381424] text-amber-950 dark:text-churchgold-300 border border-amber-300 dark:border-[#5a2237] text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>توليد عشوائي</span>
+                </button>
+              </div>
+            </div>
 
             <div className="flex items-center gap-3 pt-2">
               <button
-                onClick={() => {
-                  const tempPass = 'tmp_' + Math.floor(100000 + Math.random() * 900000);
-                  resetUserTempPassword(servantToResetPass.id, tempPass);
-                  setResetNotice({ servantName: servantToResetPass.name, tempPass });
-                  setTimeout(() => setResetNotice(null), 8000);
+                type="button"
+                disabled={isResettingPass}
+                onClick={async () => {
+                  const cleanPass = resetPassInput.trim();
+                  if (cleanPass.length < 6) {
+                    setResetPassError('يجب ألا تقل كلمة السر المؤقتة عن 6 خانات.');
+                    return;
+                  }
+                  setResetPassError(null);
+                  setIsResettingPass(true);
+                  const res = await resetUserTempPassword(servantToResetPass.id, cleanPass);
+                  setIsResettingPass(false);
+                  if (!res.success) {
+                    setResetPassError(res.error || 'تعذر تصفير كلمة المرور.');
+                    return;
+                  }
+                  const matchedUser = users.find(u => u.id === servantToResetPass.id);
+                  setCopiedResetNotice(false);
+                  setResetNotice({
+                    servantName: servantToResetPass.name,
+                    username: matchedUser?.username || servantToResetPass.id,
+                    phone: matchedUser?.phone || servantToResetPass.phone,
+                    tempPass: cleanPass
+                  });
                   setServantToResetPass(null);
                 }}
-                className="flex-1 py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-sm"
+                className="flex-1 py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-sm disabled:opacity-50"
               >
-                تصفير كلمة المرور
+                {isResettingPass ? 'جاري التحديث...' : 'تصفير كلمة المرور'}
               </button>
               <button
+                type="button"
+                disabled={isResettingPass}
                 onClick={() => setServantToResetPass(null)}
                 className="py-2.5 px-4 rounded-xl bg-stone-100 dark:bg-[#250c1b] text-stone-700 dark:text-stone-300 hover:bg-stone-200 text-xs font-bold transition-colors cursor-pointer"
               >

@@ -238,3 +238,42 @@ export function validateUsername(
 
   return { valid: true };
 }
+
+/**
+ * Generates an unambiguous, Firebase-compliant random temporary password (8+ chars)
+ * using crypto.getRandomValues when available.
+ */
+export function generateRandomTempPassword(length = 8): string {
+  const safeLength = Math.max(6, length);
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lower = 'abcdefghjkmnpqrstuvwxyz';
+  const digits = '23456789';
+  const all = upper + lower + digits;
+
+  const getRandomInt = (max: number): number => {
+    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+      const arr = new Uint32Array(1);
+      crypto.getRandomValues(arr);
+      return arr[0] % max;
+    }
+    return Math.floor(Math.random() * max);
+  };
+
+  // Guarantee a readable prefix + mixed character classes
+  const chars: string[] = [
+    upper[getRandomInt(upper.length)],
+    lower[getRandomInt(lower.length)],
+    digits[getRandomInt(digits.length)]
+  ];
+  for (let i = chars.length; i < safeLength; i++) {
+    chars.push(all[getRandomInt(all.length)]);
+  }
+  // Fisher-Yates shuffle
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = getRandomInt(i + 1);
+    const tmp = chars[i];
+    chars[i] = chars[j];
+    chars[j] = tmp;
+  }
+  return chars.join('');
+}

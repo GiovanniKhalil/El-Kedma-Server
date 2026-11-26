@@ -37,6 +37,7 @@
         "fullName": { "type": "string", "description": "Applicant full name", "maxLength": 120 },
         "username": { "type": "string", "description": "Requested username", "maxLength": 50 },
         "phone": { "type": "string", "description": "Applicant phone number", "maxLength": 24 },
+        "tempPassword": { "type": "string", "description": "Applicant chosen password isolated to admin-only pending queue and deleted on approval", "maxLength": 100 },
         "birthDate": { "type": "string", "description": "Birth date YYYY-MM-DD", "maxLength": 20 },
         "notes": { "type": "string", "description": "Optional notes", "maxLength": 500 },
         "status": { "type": "string", "description": "Approval status", "enum": ["pending", "approved", "rejected"] },

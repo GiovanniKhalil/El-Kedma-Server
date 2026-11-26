@@ -12,7 +12,8 @@ import {
   hashPasswordSync,
   verifyPassword,
   validateUsername,
-  isPasswordEncrypted
+  isPasswordEncrypted,
+  generateRandomTempPassword
 } from '../utils/cryptoUtils';
 import {
   listenToMakhdomeen,
@@ -57,6 +58,7 @@ import {
   doesExactUsernameAliasExist,
   resolveAuthEmailViaAlias,
   syncUserLoginAliases,
+  migrateUserAuthUidInFirestore,
   wipeAllDatabaseFromFirestore
 } from '../services/firestoreService';
 import {
@@ -149,7 +151,7 @@ interface AppContextType {
   createUser: (userData: Omit<AppUser, 'id' | 'createdAt'>) => Promise<{ success: boolean; error?: string }>;
   updateUser: (id: string, userData: Partial<AppUser>) => Promise<{ success: boolean; error?: string }>;
   deleteUser: (id: string) => Promise<void>;
-  resetUserTempPassword: (id: string, tempPass: string) => Promise<void>;
+  resetUserTempPassword: (id: string, tempPass: string) => Promise<{ success: boolean; error?: string }>;
   clearAllNonAdminUsers: () => Promise<void>;
   clearAllMakhdomeen: () => Promise<void>;
 
@@ -1242,6 +1244,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
           fullName: r.fullName,
           username: r.username,
           phone: r.phone,
+          tempPassword: r.tempPassword,
           birthDate: r.birthDate,
           notes: r.notes,
           status: r.status,
@@ -1600,6 +1603,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         };
       }
 
+      const cleanPassword = (data.password || '').trim();
+      if (!cleanPassword || cleanPassword.length < 4) {
+        await logoutFirebaseAuth().catch(() => undefined);
+        return {
+          success: false,
+          error: 'كلمة السر مطلوبة ويجب ألا تقل عن 4 خانات'
+        };
+      }
+
       const notesCombined = [
         data.notes?.trim(),
         data.job ? `العمل: ${data.job.trim()}` : '',
@@ -1612,6 +1624,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         fullName: cleanName,
         username: cleanUsername,
         phone: cleanPhone,
+        tempPassword: cleanPassword.slice(0, 100),
         birthDate: data.birthDate || '1995-01-01',
         ...(notesCombined ? { notes: notesCombined.slice(0, 500) } : {}),
         status: 'pending',
@@ -1660,15 +1673,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       return { success: false, error: invariantError };
     }
 
+    const selfRegisteredPass = (reg.tempPassword || '').trim();
+    const hasSelfChosenPass = selfRegisteredPass.length > 0;
+    const chosenPassword = hasSelfChosenPass
+      ? selfRegisteredPass
+      : options.tempPassword?.trim() || generateRandomTempPassword();
+
     const authEmail = generateUniqueInternalAuthEmail();
-    const rawTempPass = options.tempPassword?.trim() || 'temp' + Math.floor(1000 + Math.random() * 9000);
-    const encryptedHash = await hashPassword(rawTempPass);
-    const provisionedUid = await provisionFirebaseAuthUser(authEmail, rawTempPass);
-    const canonicalUid = provisionedUid || 'u_' + Date.now();
+    const encryptedHash = await hashPassword(chosenPassword);
+    const provisionedUid = await provisionFirebaseAuthUser(authEmail, chosenPassword);
+    if (!provisionedUid) {
+      return {
+        success: false,
+        error: 'تعذر إنشاء حساب المصادقة في Firebase Authentication لهذا الخادم.'
+      };
+    }
+
     const primaryStage = candidateAssignments[0]?.stageName || options.assignedStage || 'عامة';
 
     await addUserToFirestore({
-      uid: canonicalUid,
+      uid: provisionedUid,
       username: cleanUsername,
       authEmail,
       passwordHash: encryptedHash,
@@ -1679,8 +1703,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       assignedStage: primaryStage,
       assignedStages: candidateAssignments.slice(1).map(a => a.stageName),
       assignments: candidateAssignments,
-      isFirstLogin: true,
-      mustChangePassword: true,
+      isFirstLogin: !hasSelfChosenPass,
+      mustChangePassword: !hasSelfChosenPass,
+      isTempPassword: !hasSelfChosenPass,
       isProtectedRoot: false,
       isAdminAssistant: false,
       canAssignMakhdomeen: true,
@@ -1695,7 +1720,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       phone: reg.phone
     });
 
-    await updatePendingRegistrationStatusInFirestore(regId, 'approved');
+    // Delete the pending registration doc immediately after approval so any stored password is purged
+    await deletePendingRegistrationFromFirestore(regId);
+    setPendingRegistrations(prev => prev.filter(r => r.id !== regId));
     return { success: true };
   };
 
@@ -1795,16 +1822,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     }
 
     const cleanUsername = (userData.username || '').trim();
-    const authEmail = generateUniqueInternalAuthEmail();
     const rawPass =
       userData.password && userData.password.trim()
         ? userData.password.trim()
-        : 'tmp_' + Math.random().toString(36).slice(2, 10);
+        : generateRandomTempPassword();
+    if (rawPass.length < 6) {
+      return { success: false, error: 'يجب ألا تقل كلمة السر المؤقتة عن 6 خانات.' };
+    }
+
+    const authEmail = generateUniqueInternalAuthEmail();
     const encryptedPassword = await hashPassword(rawPass);
 
-    // Issue real Firebase Auth UID via secondary app so admin session remains intact
+    // Issue real Firebase Auth UID via isolated secondary app so admin session remains intact
     const provisionedUid = await provisionFirebaseAuthUser(authEmail, rawPass);
-    const canonicalUid = provisionedUid || 'u_' + Date.now();
+    if (!provisionedUid) {
+      return { success: false, error: 'تعذر إنشاء الحساب في Firebase Authentication.' };
+    }
+    const canonicalUid = provisionedUid;
     const primaryStage = candidateAssignments[0]?.stageName || userData.assignedStage || 'عامة';
 
     const newUser: AppUser = {
@@ -1842,6 +1876,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         assignments: candidateAssignments,
         isFirstLogin: true,
         mustChangePassword: true,
+        isTempPassword: true,
         isProtectedRoot: newUser.isProtectedRoot,
         isAdminAssistant: newUser.isAdminAssistant,
         canAssignMakhdomeen: newUser.canAssignMakhdomeen,
@@ -1856,8 +1891,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         username: cleanUsername,
         phone: userData.phone || ''
       });
-    } catch (err) {
-      console.warn('Failed to add user to Firestore:', err);
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'فشل حفظ بيانات الحساب في قاعدة البيانات.' };
     }
 
     return { success: true };
@@ -1917,21 +1952,88 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       !/^[•*]+$/.test(updatedPayload.password.trim())
     ) {
       rawNewPassword = updatedPayload.password.trim();
+      if (rawNewPassword.length < 6 && currentUserRef.current?.id !== canonicalUid) {
+        return { success: false, error: 'يجب ألا تقل كلمة السر الجديدة عن 6 خانات.' };
+      }
       updatedPayload.password = await hashPassword(rawNewPassword);
     } else {
       delete updatedPayload.password;
     }
 
     const nextUsername = (updatedPayload.username || existingUser?.username || canonicalUid).trim();
-    const canonicalAuthEmail =
-      existingUser?.authEmail ||
-      generateUniqueInternalAuthEmail();
-
+    const isSelfUpdate = Boolean(currentUserRef.current && currentUserRef.current.id === canonicalUid);
+    const nextPhone = updatedPayload.phone ?? existingUser?.phone ?? '';
     const primaryStage =
       candidateAssignments[0]?.stageName ||
       updatedPayload.assignedStage ||
       existingUser?.assignedStage ||
       'عامة';
+
+    // If admin sets a new password for another user, update Firebase Auth via secondaryAuth too
+    if (rawNewPassword && !isSelfUpdate && existingUser?.role !== 'amin_khedma_am') {
+      const freshAuthEmail = generateUniqueInternalAuthEmail();
+      const provisionedUid = await provisionFirebaseAuthUser(freshAuthEmail, rawNewPassword);
+      if (!provisionedUid) {
+        return { success: false, error: 'تعذر تحديث كلمة المرور في Firebase Authentication.' };
+      }
+
+      const nextIsTemp = updatedPayload.isTempPassword !== undefined ? Boolean(updatedPayload.isTempPassword) : false;
+      const migratedUser: AppUser = {
+        ...(existingUser || ({} as AppUser)),
+        ...updatedPayload,
+        id: provisionedUid,
+        uid: provisionedUid,
+        username: nextUsername,
+        authEmail: freshAuthEmail,
+        role: nextRole,
+        assignedStage: primaryStage,
+        assignedStages: candidateAssignments.slice(1).map(a => a.stageName),
+        assignments: candidateAssignments,
+        password: updatedPayload.password,
+        isTempPassword: nextIsTemp,
+        mustChangePassword: nextIsTemp
+      };
+
+      await migrateUserAuthUidInFirestore({
+        oldUid: canonicalUid,
+        newUid: provisionedUid,
+        newUser: {
+          uid: provisionedUid,
+          username: nextUsername,
+          authEmail: freshAuthEmail,
+          passwordHash: updatedPayload.password,
+          fullName: updatedPayload.name ?? existingUser?.name ?? '',
+          phone: nextPhone,
+          role: nextRole,
+          assignedClass: primaryStage,
+          assignedStage: primaryStage,
+          assignedStages: migratedUser.assignedStages,
+          assignments: candidateAssignments,
+          isFirstLogin: nextIsTemp,
+          mustChangePassword: nextIsTemp,
+          isTempPassword: nextIsTemp,
+          isProtectedRoot: Boolean(existingUser?.isProtectedRoot),
+          isAdminAssistant: updatedPayload.isAdminAssistant ?? existingUser?.isAdminAssistant ?? false,
+          canAssignMakhdomeen: updatedPayload.canAssignMakhdomeen ?? existingUser?.canAssignMakhdomeen ?? true,
+          birthDate: updatedPayload.birthDate ?? existingUser?.birthDate,
+          job: updatedPayload.job ?? existingUser?.job,
+          area: updatedPayload.area ?? existingUser?.area,
+          notes: updatedPayload.notes ?? existingUser?.notes,
+          avatarUrl: updatedPayload.avatarUrl ?? existingUser?.avatarUrl,
+          createdAt: existingUser?.createdAt || new Date().toISOString()
+        }
+      });
+
+      setUsers(prev => prev.filter(u => u.id !== canonicalUid && u.id !== provisionedUid).concat(migratedUser));
+      setChildren(prev =>
+        prev.map(c => (c.assignedServantId === canonicalUid ? { ...c, assignedServantId: provisionedUid } : c))
+      );
+      return { success: true };
+    }
+
+    const canonicalAuthEmail =
+      existingUser?.authEmail ||
+      generateUniqueInternalAuthEmail();
 
     updatedPayload.username = nextUsername;
     updatedPayload.authEmail = canonicalAuthEmail;
@@ -1943,7 +2045,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       prev.map(u => (u.id === canonicalUid ? { ...u, ...updatedPayload } : u))
     );
 
-    if (currentUserRef.current && currentUserRef.current.id === canonicalUid) {
+    if (isSelfUpdate && currentUserRef.current) {
       const updatedCurr: AppUser = { ...currentUserRef.current, ...updatedPayload };
       setCurrentUser(updatedCurr);
       sessionStorage.setItem('church_app_current_user', JSON.stringify(updatedCurr));
@@ -1952,14 +2054,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
       if (rawNewPassword) {
         try {
           await updateFirebaseUserPassword(formatSafeFirebasePass(rawNewPassword));
-        } catch (authPassErr) {
+        } catch (authPassErr: any) {
           console.warn('Firebase Auth password sync notice:', authPassErr);
+          if (authPassErr?.code === 'auth/requires-recent-login') {
+            return {
+              success: false,
+              error: 'لأسباب أمنية من Firebase، يرجى تسجيل الخروج وإعادة الدخول ثم تحديث كلمة المرور.'
+            };
+          }
         }
       }
     }
 
     try {
-      const nextPhone = updatedPayload.phone ?? existingUser?.phone ?? '';
       const updateData: Record<string, any> = {
         uid: canonicalUid,
         fullName: updatedPayload.name ?? existingUser?.name ?? '',
@@ -1994,8 +2101,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
         oldUsername: existingUser?.username,
         oldPhone: existingUser?.phone
       });
-    } catch (err) {
-      console.warn('Failed to update user in Firestore:', err);
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'فشل تحديث بيانات المستخدم في قاعدة البيانات.' };
     }
 
     return { success: true };
@@ -2022,30 +2129,128 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     }
   };
 
-  const resetUserTempPassword = async (id: string, tempPass: string) => {
-    const encryptedPassword = await hashPassword(tempPass.trim());
-    const targetUser = usersRef.current.find(u => u.id === id || u.username === id);
-    const canonicalUid = targetUser?.id || id;
-
-    setUsers(prev =>
-      prev.map(u => (u.id === canonicalUid ? { ...u, password: encryptedPassword, isTempPassword: true, mustChangePassword: true } : u))
-    );
-
-    if (currentUserRef.current && currentUserRef.current.id === canonicalUid) {
-      const updatedCurr = { ...currentUserRef.current, password: encryptedPassword, isTempPassword: true, mustChangePassword: true };
-      setCurrentUser(updatedCurr);
-      sessionStorage.setItem('church_app_current_user', JSON.stringify(updatedCurr));
+  const resetUserTempPassword = async (
+    id: string,
+    tempPass: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const cleanTemp = tempPass.trim();
+    if (cleanTemp.length < 6) {
+      return { success: false, error: 'يجب ألا تقل كلمة السر المؤقتة عن 6 خانات.' };
     }
 
+    const targetUser = usersRef.current.find(u => u.id === id || u.username === id);
+    if (!targetUser) {
+      return { success: false, error: 'تعذر العثور على الحساب المطلوب.' };
+    }
+
+    const canonicalUid = targetUser.id || id;
+    const encryptedPassword = await hashPassword(cleanTemp);
+    const isSelfReset = Boolean(currentUserRef.current && currentUserRef.current.id === canonicalUid);
+
+    if (isSelfReset || targetUser.role === 'amin_khedma_am') {
+      try {
+        await updateFirebaseUserPassword(formatSafeFirebasePass(cleanTemp));
+      } catch (err: any) {
+        const msg =
+          err?.code === 'auth/requires-recent-login'
+            ? 'لأسباب أمنية من Firebase، يرجى تسجيل الخروج وإعادة الدخول قبل تصفير كلمة سر حسابك الشخصي.'
+            : err?.message || 'تعذر تحديث كلمة المرور في Firebase Authentication.';
+        return { success: false, error: msg };
+      }
+
+      setUsers(prev =>
+        prev.map(u =>
+          u.id === canonicalUid
+            ? { ...u, password: encryptedPassword, isTempPassword: true, mustChangePassword: true }
+            : u
+        )
+      );
+
+      if (currentUserRef.current && currentUserRef.current.id === canonicalUid) {
+        const updatedCurr = {
+          ...currentUserRef.current,
+          password: encryptedPassword,
+          isTempPassword: true,
+          mustChangePassword: true
+        };
+        setCurrentUser(updatedCurr);
+        sessionStorage.setItem('church_app_current_user', JSON.stringify(updatedCurr));
+      }
+
+      try {
+        await updateUserInFirestore(canonicalUid, {
+          uid: canonicalUid,
+          isFirstLogin: true,
+          mustChangePassword: true,
+          isTempPassword: true,
+          passwordHash: encryptedPassword
+        });
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'فشل حفظ كلمة السر المؤقتة في قاعدة البيانات.' };
+      }
+
+      return { success: true };
+    }
+
+    // Other servant accounts: provision a fresh Firebase Auth credential via isolated secondaryAuth session
+    // so amin_khedma_am stays signed in, then migrate /users/{oldUid} -> /users/{newAuthUid}.
+    const newAuthEmail = generateUniqueInternalAuthEmail();
+    const newAuthUid = await provisionFirebaseAuthUser(newAuthEmail, cleanTemp);
+    if (!newAuthUid) {
+      return { success: false, error: 'تعذر تحديث كلمة المرور في Firebase Authentication.' };
+    }
+
+    const primaryStage = targetUser.assignedStage || targetUser.assignments?.[0]?.stageName || 'عامة';
+    const nextUserObj: AppUser = {
+      ...targetUser,
+      id: newAuthUid,
+      uid: newAuthUid,
+      authEmail: newAuthEmail,
+      password: encryptedPassword,
+      isTempPassword: true,
+      mustChangePassword: true
+    };
+
     try {
-      await updateUserInFirestore(canonicalUid, {
-        uid: canonicalUid,
-        isFirstLogin: true,
-        mustChangePassword: true,
-        passwordHash: encryptedPassword
+      await migrateUserAuthUidInFirestore({
+        oldUid: canonicalUid,
+        newUid: newAuthUid,
+        newUser: {
+          uid: newAuthUid,
+          username: targetUser.username,
+          authEmail: newAuthEmail,
+          passwordHash: encryptedPassword,
+          fullName: targetUser.name,
+          phone: targetUser.phone || '',
+          role: targetUser.role,
+          assignedClass: primaryStage,
+          assignedStage: primaryStage,
+          assignedStages: targetUser.assignedStages || [],
+          assignments: targetUser.assignments || [],
+          isFirstLogin: true,
+          mustChangePassword: true,
+          isTempPassword: true,
+          isProtectedRoot: Boolean(targetUser.isProtectedRoot),
+          isAdminAssistant: Boolean(targetUser.isAdminAssistant),
+          canAssignMakhdomeen: targetUser.canAssignMakhdomeen !== undefined ? Boolean(targetUser.canAssignMakhdomeen) : true,
+          birthDate: targetUser.birthDate,
+          job: targetUser.job,
+          area: targetUser.area,
+          notes: targetUser.notes,
+          avatarUrl: targetUser.avatarUrl,
+          createdAt: targetUser.createdAt || new Date().toISOString()
+        }
       });
-    } catch (err) {
-      console.warn('Failed to reset user password in Firestore:', err);
+
+      setUsers(prev =>
+        prev.filter(u => u.id !== canonicalUid && u.id !== newAuthUid).concat(nextUserObj)
+      );
+      setChildren(prev =>
+        prev.map(c => (c.assignedServantId === canonicalUid ? { ...c, assignedServantId: newAuthUid } : c))
+      );
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'فشل تحديث بيانات الحساب في قاعدة البيانات.' };
     }
   };
 

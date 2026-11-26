@@ -99,12 +99,13 @@ service cloud.firestore {
 
     function isValidPendingRegistration(data) {
       return data.keys().hasAll(['fullName', 'username', 'phone', 'status', 'createdAt']) &&
-        data.keys().hasOnly(['fullName', 'username', 'phone', 'birthDate', 'notes', 'status', 'createdAt']) &&
+        data.keys().hasOnly(['fullName', 'username', 'phone', 'tempPassword', 'birthDate', 'notes', 'status', 'createdAt']) &&
         data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 120 &&
         data.username is string && data.username.size() >= 3 && data.username.size() <= 50 &&
         data.phone is string && data.phone.size() >= 6 && data.phone.size() <= 24 &&
         data.status is string && data.status in ['pending', 'approved', 'rejected'] &&
         data.createdAt is string && data.createdAt.size() <= 40 &&
+        (!('tempPassword' in data) || (data.tempPassword is string && data.tempPassword.size() >= 4 && data.tempPassword.size() <= 100)) &&
         (!('birthDate' in data) || (data.birthDate is string && data.birthDate.size() <= 20)) &&
         (!('notes' in data) || (data.notes is string && data.notes.size() <= 500));
     }

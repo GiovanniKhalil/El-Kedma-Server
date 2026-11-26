@@ -87,6 +87,7 @@ export interface PendingRegistration {
   fullName: string;
   username: string;
   phone: string;
+  tempPassword?: string;
   birthDate?: string;
   notes?: string;
   status: 'pending' | 'approved' | 'rejected';

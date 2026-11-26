@@ -57,6 +57,7 @@ export interface FirestorePendingRegistration {
   fullName: string;
   username: string;
   phone: string;
+  tempPassword?: string;
   birthDate?: string;
   notes?: string;
   status: 'pending' | 'approved' | 'rejected';
@@ -651,6 +652,77 @@ export async function deleteUserFromFirestore(uidOrUsername: string): Promise<vo
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
     throw error;
+  }
+}
+
+/**
+ * Atomically migrates a user record and its linked makhdomeen/attendance references
+ * from an old Firestore document ID to a freshly provisioned Firebase Auth UID
+ * (used when amin_khedma_am resets another user's Firebase Auth password via secondaryAuth).
+ */
+export async function migrateUserAuthUidInFirestore(params: {
+  oldUid: string;
+  newUid: string;
+  newUser: FirestoreUser;
+}): Promise<void> {
+  const { oldUid, newUid, newUser } = params;
+  const cleanOld = oldUid.trim();
+  const cleanNew = newUid.trim();
+
+  // 1. Write canonical user document at /users/{newUid}
+  await addUserToFirestore({
+    ...newUser,
+    uid: cleanNew,
+  });
+
+  // 2. Sync login aliases to the new internal authEmail
+  if (newUser.authEmail) {
+    await syncUserLoginAliases({
+      authEmail: newUser.authEmail,
+      username: newUser.username,
+      phone: newUser.phone,
+    });
+  }
+
+  // 3. Remove legacy /users/{oldUid} doc (if distinct) without deleting freshly synced aliases
+  if (cleanOld && cleanOld !== cleanNew) {
+    await deleteDoc(doc(db, COLLECTIONS.USERS, cleanOld)).catch(() => undefined);
+
+    // Best-effort migrate makhdomeen follow-up references
+    try {
+      const makhSnap = await getDocs(
+        query(collection(db, COLLECTIONS.MAKHDOMEEN), where('assignedServantId', '==', cleanOld))
+      );
+      if (!makhSnap.empty) {
+        const batch = writeBatch(db);
+        makhSnap.docs.forEach((d) => batch.update(d.ref, { assignedServantId: cleanNew }));
+        await batch.commit();
+      }
+    } catch {
+      // ignore non-critical migration error
+    }
+
+    // Best-effort migrate attendance records keyed by oldUid
+    try {
+      const attSnap = await getDocs(
+        query(collection(db, COLLECTIONS.ATTENDANCE), where('personId', '==', cleanOld))
+      );
+      if (!attSnap.empty) {
+        const batch = writeBatch(db);
+        attSnap.docs.forEach((d) => {
+          const data = d.data() as FirestoreAttendance;
+          const nextDocId = `${data.date}_${data.eventType}_${cleanNew}`;
+          batch.set(doc(db, COLLECTIONS.ATTENDANCE, nextDocId), stripUndefined({
+            ...data,
+            personId: cleanNew,
+          }));
+          batch.delete(d.ref);
+        });
+        await batch.commit();
+      }
+    } catch {
+      // ignore non-critical migration error
+    }
   }
 }
 
