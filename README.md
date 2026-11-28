@@ -20,7 +20,3 @@ A real-time, cloud-based web application built to digitize general Sunday School
 - **Security:** Salted SHA-256 Hashing & Firestore Security Rules
 - **Deployment:** Vercel
 
----
-
-## Live Demo
-- **URL:** [https://el-kedma-server.vercel.app/]
