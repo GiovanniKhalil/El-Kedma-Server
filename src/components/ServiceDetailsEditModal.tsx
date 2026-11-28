@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { getStageBadgeClass } from '../utils/themeColors';
 import { getWhatsAppHref } from '../utils/phoneHelper';
+import { calculateExactAge } from '../utils/ageUtils';
 
 interface ServiceDetailsEditModalProps {
   isOpen: boolean;
@@ -655,7 +656,7 @@ export const ServiceDetailsEditModal: React.FC<ServiceDetailsEditModalProps> = (
                         <div>
                           <div className="text-xs font-black text-slate-900 dark:text-stone-100">{kid.name}</div>
                           <div className="text-[10px] text-slate-500 dark:text-stone-400 flex items-center gap-2">
-                            <span>السن: {kid.age} سنة</span>
+                            <span>السن: {calculateExactAge(kid.birthDate, kid.age)} سنة</span>
                             {kid.parentPhone && <span>📞 {kid.parentPhone}</span>}
                           </div>
                         </div>

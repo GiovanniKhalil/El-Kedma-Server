@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Child, AttendanceRecord, EventType } from '../types';
-import { calculateAge } from '../utils/dateUtils';
+import { calculateExactAge } from '../utils/ageUtils';
 import { EVENT_LABELS, MONTHS } from '../data/mockData';
 import { Printer, Download, X, FileText, CheckCircle2, Calendar, ShieldCheck } from 'lucide-react';
 
@@ -202,7 +202,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
           {type === 'directory' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[500px] overflow-y-auto p-1">
               {scopedChildren.map((kid, idx) => {
-                const age = calculateAge(kid.birthDate, kid.age);
+                const age = calculateExactAge(kid.birthDate, kid.age);
                 return (
                   <div key={kid.id} className="p-3 bg-stone-50 border border-stone-300 rounded-xl space-y-1.5 text-xs">
                     <div className="flex items-center justify-between border-b border-stone-200 pb-1.5">

@@ -14,6 +14,7 @@ import { PrintReportModal } from './PrintReportModal';
 import { getStageBadgeClass } from '../utils/themeColors';
 import { getWhatsAppHref } from '../utils/phoneHelper';
 import { generateRandomTempPassword } from '../utils/cryptoUtils';
+import { calculateExactAge } from '../utils/ageUtils';
 
 export const ServantsDirectoryTab: React.FC<{
   onAddServant: () => void;
@@ -542,6 +543,11 @@ export const ServantsDirectoryTab: React.FC<{
                       </div>
                       <div className="text-xs text-slate-700 dark:text-stone-300 font-bold truncate flex items-center gap-1.5 mt-0.5">
                         <span>{displayRoleLabel}</span>
+                        {servant.birthDate && calculateExactAge(servant.birthDate) > 0 && (
+                          <span className="text-[11px] text-slate-500 dark:text-stone-400 tabular-nums">
+                            • {calculateExactAge(servant.birthDate)} سنة
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>

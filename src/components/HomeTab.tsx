@@ -10,7 +10,6 @@ import {
 
 import { parseBirthDate } from './BirthdayWidget';
 import { getWhatsAppHref } from '../utils/phoneHelper';
-import { ChurchHierarchyTree } from './ChurchHierarchyTree';
 
 export const HomeTab: React.FC<{
   onOpenAddChild?: () => void;
@@ -559,9 +558,6 @@ export const HomeTab: React.FC<{
         </div>
 
       </div>
-
-      {/* Visual Ecclesiastical Church Hierarchy Tree */}
-      <ChurchHierarchyTree />
 
       {/* Modal: Add Notification */}
       {isAddNotifOpen && (

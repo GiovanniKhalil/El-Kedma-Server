@@ -6,7 +6,7 @@ import {
   ChildEventType, StaffEventType, FilterState, AppUser, ChurchEventNotification,
   ThemeMode, PendingRegistration, SeasonalEvent
 } from '../types';
-import { calculateDynamicAge } from '../utils/ageUtils';
+import { calculateExactAge, parseBirthDateParts } from '../utils/ageUtils';
 import {
   hashPassword,
   hashPasswordSync,
@@ -838,9 +838,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     // 2. Real-time listener for Makhdomeen (Unconditional — empty array clears deleted items!)
     const unsubMakhdomeen = listenToMakhdomeen((firestoreMakhdomeen) => {
       const mappedChildren: Child[] = firestoreMakhdomeen.map(m => {
-        const age = calculateDynamicAge(m.birthDate || '2017-01-01', m.age);
-        const birthMonth = m.birthDate && m.birthDate.includes('-')
-          ? (parseInt(m.birthDate.split('-')[1], 10) || 1)
+        const age = calculateExactAge(m.birthDate || '2017-01-01', m.age);
+        const birthMonth = m.birthDate
+          ? parseBirthDateParts(m.birthDate, 1).month
           : 1;
 
         return {
@@ -1074,7 +1074,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
             area: u.area || 'المعراج السفلي',
             job: u.job || 'خادم',
             birthDate: u.birthDate || '1995-01-01',
-            birthMonth: u.birthDate ? parseInt(u.birthDate.split('-')[1], 10) || 1 : 1,
+            birthMonth: u.birthDate ? parseBirthDateParts(u.birthDate, 1).month : 1,
             roleType,
             roleTitle,
             notes: u.notes || '',
@@ -1115,7 +1115,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
             area: u.area || 'المعراج السفلي',
             job: u.job || 'خادم',
             birthDate: u.birthDate || '1995-01-01',
-            birthMonth: u.birthDate ? parseInt(u.birthDate.split('-')[1], 10) || 1 : 1,
+            birthMonth: u.birthDate ? parseBirthDateParts(u.birthDate, 1).month : 1,
             notes: u.notes || '',
             is_directory_visible: true,
             createdAt: u.createdAt || new Date().toISOString().split('T')[0]
@@ -3594,12 +3594,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
           ...child,
           stage: nextStage,
           stageId: stgItem?.id || child.stageId,
-          age: calculateDynamicAge(child.birthDate, (child.age || 0) + 1)
+          age: calculateExactAge(child.birthDate, (child.age || 0) + 1)
         };
       }
       return {
         ...child,
-        age: calculateDynamicAge(child.birthDate, child.age)
+        age: calculateExactAge(child.birthDate, child.age)
       };
     });
 
@@ -3620,7 +3620,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children:
     () =>
       children.map(c => ({
         ...c,
-        age: calculateDynamicAge(c.birthDate, c.age)
+        age: calculateExactAge(c.birthDate, c.age)
       })),
     [children]
   );

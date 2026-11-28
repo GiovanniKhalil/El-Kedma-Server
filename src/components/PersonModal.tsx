@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Child, Servant, Supervisor, Stage } from '../types';
 import { MONTHS, AREAS } from '../data/mockData';
 import { useApp } from '../context/AppContext';
+import { calculateExactAge, parseBirthDateParts } from '../utils/ageUtils';
 import { 
   X, User, Phone, MapPin, Briefcase, Calendar, Cake, 
   FileText, CheckCircle2, Users, Crown, Sparkles, AlertCircle, ArrowRight
@@ -81,8 +82,12 @@ export const PersonModal: React.FC<PersonModalProps> = ({
     setFormError(null);
     if (initialData) {
       const isSupAssistant = !!((initialData as any).isAssistant || (initialData as any).roleType === 'assistant_supervisor');
+      const parsedInitialBirth = parseBirthDateParts(initialData.birthDate, initialData.birthMonth);
+      const exactInitialAge = calculateExactAge(initialData.birthDate, (initialData as Child).age || 0);
       setFormData({
         ...initialData,
+        age: exactInitialAge,
+        birthMonth: initialData.birthDate ? parsedInitialBirth.month : initialData.birthMonth,
         stage: (initialData as Child).stage || 'ابتدائي (ثالثة ورابعة)',
         assignedStage: (initialData as Servant).assignedStage || (initialData as Supervisor).assignedStage || 'ابتدائي (ثالثة ورابعة)',
         supervisedStage: (initialData as Supervisor).supervisedStage || (initialData as Servant).assignedStage || 'ابتدائي (ثالثة ورابعة)',
@@ -149,27 +154,9 @@ export const PersonModal: React.FC<PersonModalProps> = ({
   };
 
   const handleBirthDateChange = (dateStr: string) => {
-    let calculatedAge = formData.age;
-    let calculatedMonth = formData.birthMonth;
-
-    if (dateStr) {
-      const parts = dateStr.split('-');
-      if (parts.length === 3) {
-        const year = parseInt(parts[0], 10);
-        const month = parseInt(parts[1], 10);
-        const day = parseInt(parts[2], 10);
-
-        if (month) calculatedMonth = month;
-        if (year && month && day) {
-          const today = new Date();
-          let calculated = today.getFullYear() - year;
-          if (today.getMonth() + 1 < month || (today.getMonth() + 1 === month && today.getDate() < day)) {
-            calculated--;
-          }
-          if (calculated >= 0) calculatedAge = calculated;
-        }
-      }
-    }
+    const parsed = parseBirthDateParts(dateStr, formData.birthMonth);
+    const calculatedAge = dateStr ? calculateExactAge(dateStr, formData.age) : formData.age;
+    const calculatedMonth = dateStr && parsed.month ? parsed.month : formData.birthMonth;
 
     setFormData((prev: any) => ({
       ...prev,
@@ -192,13 +179,9 @@ export const PersonModal: React.FC<PersonModalProps> = ({
     setFormError(null);
 
     // Extract month from birthDate
-    let month = formData.birthMonth;
-    if (formData.birthDate) {
-      const parts = formData.birthDate.split('-');
-      if (parts.length === 3) {
-        month = parseInt(parts[1], 10);
-      }
-    }
+    const month = formData.birthDate
+      ? parseBirthDateParts(formData.birthDate, formData.birthMonth).month
+      : formData.birthMonth;
 
     setIsSubmitting(true);
     try {

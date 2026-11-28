@@ -13,7 +13,7 @@ import { PersonAttendanceModal } from './PersonAttendanceModal';
 import { PersonDetailsModal } from './PersonDetailsModal';
 import { PrintReportModal } from './PrintReportModal';
 import { getStageBadgeClass } from '../utils/themeColors';
-import { calculateAge, isUpcomingBirthday, getDaysUntilBirthday } from '../utils/dateUtils';
+import { calculateExactAge } from '../utils/ageUtils';
 import { exportChildrenToXLSX, parseExcelOrCsvFile, downloadExcelTemplate } from '../utils/excelService';
 import { getWhatsAppHref } from '../utils/phoneHelper';
 
@@ -79,7 +79,8 @@ export const ChildrenDirectoryTab: React.FC<{
           : (userStages.includes(child.stage) || (child.secondaryStages && child.secondaryStages.some(s => userStages.includes(s)))))
       : (child.stage === effectiveStage || (child.secondaryStages && child.secondaryStages.includes(effectiveStage)));
     const matchesBirthMonth = filters.birthMonthFilter === 'all' || child.birthMonth === Number(filters.birthMonthFilter);
-    const matchesAge = filters.ageFilter === 'all' || child.age === Number(filters.ageFilter);
+    const childExactAge = calculateExactAge(child.birthDate, child.age);
+    const matchesAge = filters.ageFilter === 'all' || childExactAge === Number(filters.ageFilter);
 
     return matchesSearch && matchesStage && matchesBirthMonth && matchesAge;
   });
@@ -448,8 +449,8 @@ export const ChildrenDirectoryTab: React.FC<{
                       <div className="font-black text-sm sm:text-base text-slate-950 dark:text-stone-100 truncate block">
                         {child.name}
                       </div>
-                      <div className="text-xs text-slate-700 dark:text-stone-300 font-bold">
-                        السن: {child.age} سنة • {child.gender === 'boy' ? 'ولد 👦' : 'بنت 👧'}
+                      <div className="text-xs text-slate-700 dark:text-stone-300 font-bold tabular-nums">
+                        السن: {calculateExactAge(child.birthDate, child.age)} سنة • {child.gender === 'boy' ? 'ولد 👦' : 'بنت 👧'}
                       </div>
                     </div>
                   </div>
@@ -702,7 +703,7 @@ export const ChildrenDirectoryTab: React.FC<{
                       </div>
                       <div className="text-xs text-slate-500 dark:text-stone-400 mt-0.5 flex items-center gap-2">
                         <span>المرحلة: <strong className="text-burgundy-800 dark:text-churchgold-300">{c.stage}</strong></span>
-                        {c.age && <span>• السن: {c.age} سنين</span>}
+                        {(c.birthDate || c.age) && <span>• السن: {calculateExactAge(c.birthDate, c.age)} سنين</span>}
                       </div>
                     </div>
                   </div>

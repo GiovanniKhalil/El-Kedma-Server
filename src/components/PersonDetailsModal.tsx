@@ -7,7 +7,7 @@ import {
   XCircle, Award, Home, Mail, UserCheck, Users
 } from 'lucide-react';
 import { getStageBadgeClass } from '../utils/themeColors';
-import { calculateAge } from '../utils/dateUtils';
+import { calculateExactAge } from '../utils/ageUtils';
 import { getWhatsAppHref } from '../utils/phoneHelper';
 
 interface PersonDetailsModalProps {
@@ -63,9 +63,7 @@ export const PersonDetailsModal: React.FC<PersonDetailsModalProps> = ({
   const currentMonth = new Date().getMonth() + 1;
   const isBirthdayThisMonth = person.birthMonth === currentMonth;
 
-  const calculatedAge = isChild && child 
-    ? calculateAge(child.birthDate, child.age) 
-    : null;
+  const calculatedAge = calculateExactAge(person.birthDate, isChild && child ? child.age : 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs overflow-y-auto">
@@ -109,8 +107,8 @@ export const PersonDetailsModal: React.FC<PersonDetailsModalProps> = ({
               </div>
 
               <div className="flex items-center gap-2 mt-1.5 text-xs text-churchgold-300 flex-wrap">
-                {isChild && calculatedAge && (
-                  <span className="bg-white/10 px-2 py-0.5 rounded-md font-bold text-amber-200">
+                {calculatedAge > 0 && (
+                  <span className="bg-white/10 px-2 py-0.5 rounded-md font-bold text-amber-200 tabular-nums">
                     السن: {calculatedAge} سنة
                   </span>
                 )}
@@ -211,8 +209,8 @@ export const PersonDetailsModal: React.FC<PersonDetailsModalProps> = ({
 
               <div className="bg-white dark:bg-[#18080f] p-3 rounded-xl border border-amber-200/60 dark:border-[#33111d] shadow-2xs">
                 <span className="text-xs text-slate-700 dark:text-stone-300 block font-bold mb-0.5">السن وشهر الميلاد:</span>
-                <span className="font-black text-sm text-slate-950 dark:text-stone-100 block">
-                  {calculatedAge ? `${calculatedAge} سنة ` : ''}(شهر {person.birthMonth})
+                <span className="font-black text-sm text-slate-950 dark:text-stone-100 block tabular-nums">
+                  {calculatedAge > 0 ? `${calculatedAge} سنة ` : ''}(شهر {person.birthMonth})
                 </span>
               </div>
 

@@ -3,7 +3,7 @@
  */
 import * as XLSX from 'xlsx';
 import { Child, Stage, AttendanceRecord, EventType } from '../types';
-import { calculateAge } from './dateUtils';
+import { calculateExactAge, parseBirthDateParts } from './ageUtils';
 import { EVENT_LABELS, MONTHS } from '../data/mockData';
 
 export interface ParsedChildExcelRow {
@@ -46,7 +46,7 @@ export function normalizeStageName(raw: string): Stage {
  */
 export function exportChildrenToXLSX(children: Child[], stageName = 'عام'): void {
   const dataRows = children.map((c, index) => {
-    const calculatedAge = calculateAge(c.birthDate, c.age);
+    const calculatedAge = calculateExactAge(c.birthDate, c.age);
     return {
       'م': index + 1,
       'الاسم الكامل للمخدوم': c.name,
@@ -143,7 +143,7 @@ export function exportAttendanceMonthToXLSX(
       'اسم المخدوم': kid.name,
       'المرحلة': kid.stage,
       'المراحل الفرعية': kid.secondaryStages?.join(', ') || '—',
-      'السن': calculateAge(kid.birthDate, kid.age),
+      'السن': calculateExactAge(kid.birthDate, kid.age),
       'تليفون ولي الأمر': kid.parentPhone
     };
 
@@ -273,16 +273,11 @@ export async function parseExcelOrCsvFile(file: File): Promise<ParsedChildExcelR
       }
     }
 
-    let birthMonth = 1;
-    if (birthDate) {
-      const parts = birthDate.split(/[-/]/);
-      if (parts.length === 3) {
-        birthMonth = parseInt(parts[0].length === 4 ? parts[1] : parts[0], 10) || 1;
-      }
-    }
+    const parsedDate = parseBirthDateParts(birthDate, 1);
+    const birthMonth = birthDate ? parsedDate.month : 1;
 
     const rawAge = ageCol !== -1 ? parseInt(String(row[ageCol] || ''), 10) : undefined;
-    const age = calculateAge(birthDate, rawAge || 9);
+    const age = calculateExactAge(birthDate, rawAge || 9);
 
     const area = areaCol !== -1 ? String(row[areaCol] || '').trim() : 'المعراج';
     const phone = phoneCol !== -1 ? String(row[phoneCol] || '').trim() : '';
